@@ -13,7 +13,7 @@ import naming
 STATE_DIRECTORY = Path(".governance/state")
 TASK_MARKER = STATE_DIRECTORY / "task.json"
 PROTECTED_PATHS = (".codex", ".governance", ".githooks", "AGENTS.md", "docs/GOVERNANCE.md")
-PROTECTED_BRANCHES = frozenset({"master"})
+PROTECTED_BRANCHES = frozenset({"main"})
 GOVERNANCE_BRANCH_MARKER = "governance"
 
 
