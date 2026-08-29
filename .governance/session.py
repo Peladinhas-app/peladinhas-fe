@@ -13,7 +13,7 @@ import naming
 STATE_DIRECTORY = Path(".governance/state")
 TASK_MARKER = STATE_DIRECTORY / "task.json"
 PROTECTED_PATHS = (".codex", ".governance", ".githooks", "AGENTS.md", "docs/GOVERNANCE.md")
-PROTECTED_BRANCHES = frozenset({"master", "staging"})
+PROTECTED_BRANCHES = frozenset({"master"})
 GOVERNANCE_BRANCH_MARKER = "governance"
 
 
@@ -95,19 +95,19 @@ def current_head(cwd: Optional[Path] = None) -> str:
     return run_git("rev-parse", "HEAD", cwd=cwd, check=False).strip()
 
 
-def staging_head(cwd: Optional[Path] = None) -> str:
-    """Return the last fetched origin/staging commit, or nothing if absent."""
+def main_head(cwd: Optional[Path] = None) -> str:
+    """Return the current main branch commit."""
     return run_git(
-        "rev-parse", "refs/remotes/origin/staging", cwd=cwd, check=False
+        "rev-parse", "refs/heads/main", cwd=cwd, check=False
     ).strip()
 
 
-def staging_merge_in_progress(cwd: Optional[Path] = None) -> bool:
-    """Tell whether an approved origin/staging merge needs conflict resolution."""
+def main_merge_in_progress(cwd: Optional[Path] = None) -> bool:
+    """Tell whether a main-branch merge needs conflict resolution."""
     merge_head = run_git(
         "rev-parse", "-q", "--verify", "MERGE_HEAD", cwd=cwd, check=False
     ).strip()
-    return bool(merge_head and merge_head == staging_head(cwd))
+    return bool(merge_head and merge_head == main_head(cwd))
 
 
 def governance_branch(cwd: Optional[Path] = None) -> bool:
@@ -140,7 +140,7 @@ def _main_base(root: Path) -> tuple[Path, str, str]:
     branch = current_branch(main)
     if branch not in PROTECTED_BRANCHES:
         raise GovernanceStateError(
-            "Main checkout must be on master or staging before task work starts"
+            "Main checkout must be on main before task work starts"
         )
     head = current_head(main)
     if not head:
@@ -165,9 +165,9 @@ def validate_temporary_context(root: Path) -> None:
             "Temporary worktree already has changes; rename must happen before modification"
         )
     _, base_branch, _ = _main_base(root)
-    base_head = staging_head(root)
+    base_head = main_head(root)
     if not base_head:
-        raise GovernanceStateError("origin/staging has not been fetched")
+        raise GovernanceStateError("main branch could not be resolved")
     if not git_succeeds("merge-base", "--is-ancestor", base_head, "HEAD", cwd=root):
         raise GovernanceStateError(
             f"Temporary worktree does not contain current origin/{base_branch} "
@@ -235,13 +235,13 @@ def validate_task_context(root: Path) -> None:
     if problems:
         raise GovernanceStateError("Invalid task branch: " + "; ".join(problems))
 
-    remote_head = staging_head(root)
-    if not remote_head:
-        raise GovernanceStateError("origin/staging has not been fetched")
-    if not git_succeeds("merge-base", "--is-ancestor", remote_head, "HEAD", cwd=root):
+    base_head = main_head(root)
+    if not base_head:
+        raise GovernanceStateError("main branch could not be resolved")
+    if not git_succeeds("merge-base", "--is-ancestor", base_head, "HEAD", cwd=root):
         raise GovernanceStateError(
-            f"Task branch does not contain current origin/staging "
-            f"({remote_head[:12]})"
+            f"Task branch does not contain current main "
+            f"({base_head[:12]})"
         )
 
     marker = root / TASK_MARKER
