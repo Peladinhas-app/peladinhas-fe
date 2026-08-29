@@ -265,9 +265,9 @@ def validate_task_context(root: Path) -> None:
         )
     if not existing.get("base_head"):
         main = main_checkout(root)
-        main_head = current_head(main) if main else ""
+        checkout_head = current_head(main) if main else ""
         existing["base_head"] = run_git(
-            "merge-base", "HEAD", main_head, cwd=root
+            "merge-base", "HEAD", checkout_head, cwd=root
         ).strip()
         _write_json(marker, existing)
 
