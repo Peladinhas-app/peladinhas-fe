@@ -4,7 +4,6 @@ paths:
   - "src/**/*.ts"
   - "**/*.trigger.ts"
   - "trigger.config.ts"
-  - "trigger.staging.config.ts"
 ---
 
 # Trigger.dev tasks
@@ -25,8 +24,6 @@ production silently.
 
 ## This repo
 
-- Deploys are driven by `package.json` scripts (`deploy:dev`, `deploy:staging`,
-  `deploy:prod`). Do not hand-roll a deploy command.
-- Two configs exist: `trigger.config.ts` and `trigger.staging.config.ts`.
-  Check which environment a change targets before editing either.
-- Tests run under vitest (`npm test`), not pytest.
+No Trigger.dev project files are present in this governance-only checkout. If
+they are restored later, use the repository scripts and configs that exist at
+that time instead of carrying assumptions from another backend.

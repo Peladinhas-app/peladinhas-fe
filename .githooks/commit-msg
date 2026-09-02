@@ -1,0 +1,31 @@
+#!/bin/sh
+# Reject commit messages that do not follow the governed structure.
+set -eu
+
+REPO_ROOT=$(git rev-parse --show-toplevel)
+MESSAGE_CHECKER="$REPO_ROOT/.githooks/message_structure.py"
+PYTHON=${PYTHON:-}
+
+if [ -z "$PYTHON" ]; then
+    for candidate in "python3" "python" "py -3"; do
+        if $candidate -c "import sys" >/dev/null 2>&1; then
+            PYTHON=$candidate
+            break
+        fi
+    done
+fi
+if [ -z "$PYTHON" ]; then
+    echo "commit-msg: Python is required for governance checks" >&2
+    exit 1
+fi
+
+if [ "$#" -lt 1 ]; then
+    echo "commit-msg: no message file supplied" >&2
+    exit 1
+fi
+if [ ! -f "$MESSAGE_CHECKER" ]; then
+    echo "commit-msg: message checker is missing" >&2
+    exit 1
+fi
+
+PYTHONDONTWRITEBYTECODE=1 "$PYTHON" "$MESSAGE_CHECKER" commit-message "$1"

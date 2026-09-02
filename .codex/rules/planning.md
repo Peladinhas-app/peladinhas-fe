@@ -20,8 +20,9 @@ shows what was done, not what is right. When you follow a pattern, say why it
 fits here. When you depart, say why. Copying without that judgement violates
 rule 5 even when the result works.
 
-Specific to this repo: much of `app/` predates the vertical-slice layout in
-`CONTRIBUTING.md`. Matching a legacy flat file is usually the wrong call.
+Specific to this repo: if legacy flat application files are restored later,
+matching them is not automatically the right call. Prefer the architecture rule
+that applies to the changed path.
 
 ## Agreeing the plan before building (rule 5)
 
@@ -63,7 +64,7 @@ alignment, and that is the whole of the mechanical enforcement.
 ## Contradictions (rule 1)
 
 Stop and ask when instructions conflict in a way that changes the output —
-between the prompt and `CLAUDE.md`, between the prompt and existing code, or
+between the prompt and `AGENTS.md`, between the prompt and existing code, or
 inside the prompt itself.
 
 State both readings and what each would produce. Do not pick one and mention

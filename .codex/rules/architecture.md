@@ -7,8 +7,9 @@ paths:
 
 # API architecture
 
-Full detail: `.github/instructions/architecture.instructions.md` and the
-"Adding New Endpoints" section of `CONTRIBUTING.md`. Both remain the source.
+Full detail belongs in future project architecture documentation when the
+frontend application code is restored. This file remains the current source for
+Python API code that appears in this repository.
 
 ## Vertical slice, always
 

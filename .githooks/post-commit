@@ -1,0 +1,7 @@
+#!/bin/sh
+# Keep the newest task commit visible as editable working history.
+set -eu
+
+printf 'post-commit: editable task commit %s on %s\n' \
+    "$(git log -1 --format='%h %s')" \
+    "$(git branch --show-current)"

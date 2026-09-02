@@ -1,6 +1,6 @@
 # Git workflow (rule 6)
 
-Claude stages and commits each coherent implementation step on the dedicated
+Codex stages and commits each coherent implementation step on the dedicated
 task branch. A coherent step is independently understandable and testable;
 avoid both one giant final commit and noisy commits for incomplete edits.
 
@@ -15,11 +15,11 @@ Recent Codex commits are working history, not a declaration that the task is
 final. Inspect them at the start of every turn and amend or follow them with an
 improvement commit when new evidence requires it.
 
-At task start, fetch `origin/staging` and integrate it before implementation.
-At completion, fetch and integrate `origin/staging` again, then run the complete
+At task start, fetch `origin/main` and integrate it before implementation.
+At completion, fetch and integrate `origin/main` again, then run the complete
 standard suite on a clean HEAD. Fix every failure, including failures inherited
-from staging. The completion hook records that exact HEAD; push approval fetches
-and runs the suite again, and pre-push rejects any later staging or HEAD change.
+from main. The completion hook records that exact HEAD; push approval fetches
+and runs the suite again, and pre-push rejects any later main or HEAD change.
 
 Never push without user confirmation. Only the exact response `APPROVE PUSH`
 creates a ten-minute, one-use approval bound to the repository, worktree,
@@ -48,5 +48,5 @@ The pre-push hook rechecks the destination branch and every new commit being
 transmitted. Git pushes have no separate message; their branch, commits, and
 pull request carry the reviewed description.
 
-Never push directly to `master` or `staging`, force-push without
-`--force-with-lease`, or delete either protected branch.
+Never push directly to `main`, force-push without `--force-with-lease`, or
+delete the protected branch.

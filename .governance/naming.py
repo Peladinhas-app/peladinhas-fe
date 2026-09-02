@@ -21,8 +21,8 @@ CODEX_TEMP_BRANCH = re.compile(
 
 
 def temporary_codex_branch(branch: str) -> bool:
-    """Tell whether Claude Desktop created this temporary task branch."""
-    return bool(CLAUDE_TEMP_BRANCH.fullmatch(branch))
+    """Tell whether Codex created this temporary task branch."""
+    return bool(CODEX_TEMP_BRANCH.fullmatch(branch))
 
 
 def fingerprint_problems(text: str) -> list[str]:

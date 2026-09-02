@@ -1,0 +1,47 @@
+#!/bin/sh
+# Require one exact user approval for one push attempt.
+set -eu
+
+REPO_ROOT=$(git rev-parse --show-toplevel)
+APPROVAL_LIB="$REPO_ROOT/.governance/approval.py"
+MESSAGE_CHECKER="$REPO_ROOT/.githooks/message_structure.py"
+REFS=$(mktemp "${TMPDIR:-/tmp}/peladinhas-pre-push.XXXXXX")
+PYTHON=${PYTHON:-}
+trap 'rm -f "$REFS"' EXIT HUP INT TERM
+cat >"$REFS"
+
+if [ -z "$PYTHON" ]; then
+    for candidate in "python3" "python" "py -3"; do
+        if $candidate -c "import sys" >/dev/null 2>&1; then
+            PYTHON=$candidate
+            break
+        fi
+    done
+fi
+if [ -z "$PYTHON" ]; then
+    echo "pre-push: Python is required for governance checks" >&2
+    exit 1
+fi
+
+if grep -Eq 'refs/heads/main( |$)' "$REFS"; then
+    echo "pre-push: direct pushes to main are forbidden" >&2
+    exit 1
+fi
+if [ ! -f "$APPROVAL_LIB" ]; then
+    echo "pre-push: push approval library is missing" >&2
+    exit 1
+fi
+while read -r local_ref local_sha remote_ref remote_sha; do
+    case "$remote_ref" in
+        refs/heads/*)
+            branch=${remote_ref#refs/heads/}
+            PYTHONDONTWRITEBYTECODE=1 "$PYTHON" "$MESSAGE_CHECKER" branch "$branch"
+            case "$local_sha" in
+                0000000000000000000000000000000000000000) ;;
+                *) PYTHONDONTWRITEBYTECODE=1 "$PYTHON" "$MESSAGE_CHECKER" push-commits "$local_sha" "$remote_sha" ;;
+            esac
+            ;;
+    esac
+done <"$REFS"
+PYTHONDONTWRITEBYTECODE=1 "$PYTHON" "$APPROVAL_LIB" check-refs "$REFS"
+PYTHONDONTWRITEBYTECODE=1 "$PYTHON" "$APPROVAL_LIB" consume

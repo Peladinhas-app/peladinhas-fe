@@ -12,7 +12,7 @@ import naming
 
 STATE_DIRECTORY = Path(".governance/state")
 TASK_MARKER = STATE_DIRECTORY / "task.json"
-PROTECTED_PATHS = (".codex", ".governance", ".githooks", "AGENTS.md", "docs/GOVERNANCE.md")
+PROTECTED_PATHS = (".codex", ".governance", ".githooks", "AGENTS.md")
 PROTECTED_BRANCHES = frozenset({"main"})
 GOVERNANCE_BRANCH_MARKER = "governance"
 
@@ -98,8 +98,20 @@ def current_head(cwd: Optional[Path] = None) -> str:
 def main_head(cwd: Optional[Path] = None) -> str:
     """Return the current main branch commit."""
     return run_git(
-        "rev-parse", "refs/heads/main", cwd=cwd, check=False
+        "rev-parse", "--verify", "refs/heads/main", cwd=cwd, check=False
     ).strip()
+
+
+def origin_main_head(cwd: Optional[Path] = None) -> str:
+    """Return the last fetched origin main commit when it exists."""
+    return run_git(
+        "rev-parse", "--verify", "refs/remotes/origin/main", cwd=cwd, check=False
+    ).strip()
+
+
+def base_head(cwd: Optional[Path] = None) -> str:
+    """Return the remote main commit, falling back to local main."""
+    return origin_main_head(cwd) or main_head(cwd)
 
 
 def main_merge_in_progress(cwd: Optional[Path] = None) -> bool:
@@ -165,13 +177,13 @@ def validate_temporary_context(root: Path) -> None:
             "Temporary worktree already has changes; rename must happen before modification"
         )
     _, base_branch, _ = _main_base(root)
-    base_head = main_head(root)
-    if not base_head:
+    current_base = base_head(root)
+    if not current_base:
         raise GovernanceStateError("main branch could not be resolved")
-    if not git_succeeds("merge-base", "--is-ancestor", base_head, "HEAD", cwd=root):
+    if not git_succeeds("merge-base", "--is-ancestor", current_base, "HEAD", cwd=root):
         raise GovernanceStateError(
             f"Temporary worktree does not contain current origin/{base_branch} "
-            f"({base_head[:12]})"
+            f"({current_base[:12]})"
         )
 
 
@@ -235,26 +247,28 @@ def validate_task_context(root: Path) -> None:
     if problems:
         raise GovernanceStateError("Invalid task branch: " + "; ".join(problems))
 
-    base_head = main_head(root)
-    if not base_head:
+    current_base = base_head(root)
+    if not current_base:
         raise GovernanceStateError("main branch could not be resolved")
-    if not git_succeeds("merge-base", "--is-ancestor", base_head, "HEAD", cwd=root):
+    if not git_succeeds("merge-base", "--is-ancestor", current_base, "HEAD", cwd=root):
         raise GovernanceStateError(
             f"Task branch does not contain current main "
-            f"({base_head[:12]})"
+            f"({current_base[:12]})"
         )
 
     marker = root / TASK_MARKER
     existing = _read_json(marker, None)
     identity = {"worktree_root": str(root.resolve()), "branch": branch}
     if existing is None:
-        _, base_branch, base_head = _main_base(root)
-        if not git_succeeds("merge-base", "--is-ancestor", base_head, "HEAD", cwd=root):
+        _, base_branch, starting_head = _main_base(root)
+        if not git_succeeds(
+            "merge-base", "--is-ancestor", starting_head, "HEAD", cwd=root
+        ):
             raise GovernanceStateError(
                 f"Task branch does not contain current {base_branch} HEAD "
-                f"({base_head[:12]})"
+                f"({starting_head[:12]})"
             )
-        _write_json(marker, {**identity, "base_head": base_head})
+        _write_json(marker, {**identity, "base_head": starting_head})
         return
     if not isinstance(existing, dict) or any(
         existing.get(key) != value for key, value in identity.items()

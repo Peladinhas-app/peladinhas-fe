@@ -15,8 +15,8 @@ Before making changes, read and follow all applicable rules in:
 These rules are mandatory.
 
 Seven rules, all mandatory. Hooks enforce mechanically whatever can be checked
-mechanically; the rest is your judgement. Detail lives in `.codex/rules/`.
-How the enforcement works: `docs/GOVERNANCE.md`.
+mechanically; the rest is your judgement. Detail lives in `.codex/rules/` and
+the reusable Git enforcement lives in `.governance/`.
 
 ## 1. Contradictions
 
@@ -90,18 +90,18 @@ refactoring, renaming, formatting, dependency maintenance, or unrelated cleanup.
 Commit behavior-preserving work separately; keep only directly related tests and
 documentation with the change they validate or explain.
 
-Before implementation, fetch and integrate `origin/staging`. Before declaring
-the task ready or requesting a push, fetch and integrate it again, then run the
-complete standard test suite. Failures inherited from staging still block
+Before implementation, fetch and integrate `origin/main`. Before declaring the
+task ready or requesting a push, fetch and integrate it again, then run the
+complete standard test suite. Failures inherited from main still block
 completion and must be fixed. The exact push approval repeats synchronization
 and the full tests; approval never bypasses either gate.
 
 Never push without explicit confirmation. The exact response `APPROVE PUSH`
 authorises one push attempt for the current branch and HEAD for ten minutes.
 
-Commit and PR messages follow `CONTRIBUTING.md`: a very short Conventional
-Commit title followed by concise supporting detail. Wording is professional,
-impersonal, plain English, never direct reader address or emoji.
+Commit and PR messages use a very short Conventional Commit title followed by
+concise supporting detail. Wording is professional, impersonal, plain English,
+never direct reader address or emoji.
 Local Git hooks enforce the worktree, branch, secret-scan, commit-message, and
 push-approval checks. Remote branch protection and required CI remain necessary
 because a local process can bypass local hooks.
