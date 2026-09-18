@@ -2,3 +2,15 @@
 __pycache__/
 *.pyc
 .governance/state/
+# Flutter and Dart local outputs
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+coverage/
+
+# Local IDE/project files
+*.iml
+.vscode/
+
