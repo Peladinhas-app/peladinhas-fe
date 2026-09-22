@@ -185,8 +185,6 @@ class _MatchDemoScreenState extends State<MatchDemoScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
     return Scaffold(
       body: SafeArea(
         child: Center(
@@ -257,14 +255,6 @@ class _MatchDemoScreenState extends State<MatchDemoScreen> {
                       ],
                     );
                   },
-                ),
-                const SizedBox(height: 20),
-                Text(
-                  'Demo organizer: ${DevelopmentConfig.organizerUserId}\n'
-                  'Demo player: ${DevelopmentConfig.playerUserId}',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: Colors.black54,
-                  ),
                 ),
               ],
             ),
