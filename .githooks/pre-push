@@ -23,12 +23,19 @@ if [ -z "$PYTHON" ]; then
     exit 1
 fi
 
-if grep -Eq 'refs/heads/main( |$)' "$REFS"; then
-    echo "pre-push: direct pushes to main are forbidden" >&2
-    exit 1
-fi
 if [ ! -f "$APPROVAL_LIB" ]; then
     echo "pre-push: push approval library is missing" >&2
+    exit 1
+fi
+if grep -Eq 'refs/heads/main( |$)' "$REFS"; then
+    if PYTHONDONTWRITEBYTECODE=1 "$PYTHON" "$APPROVAL_LIB" check-main-bootstrap-refs "$REFS" "${1:-origin}"; then
+        PYTHONDONTWRITEBYTECODE=1 "$PYTHON" "$APPROVAL_LIB" consume-main-bootstrap
+        while read -r _local_ref local_sha _remote_ref remote_sha; do
+            PYTHONDONTWRITEBYTECODE=1 "$PYTHON" "$MESSAGE_CHECKER" push-commits "$local_sha" "$remote_sha"
+        done <"$REFS"
+        exit 0
+    fi
+    echo "pre-push: direct pushes to main are forbidden" >&2
     exit 1
 fi
 while read -r local_ref local_sha remote_ref remote_sha; do

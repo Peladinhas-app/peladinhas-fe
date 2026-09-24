@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -209,6 +211,301 @@ class ApprovalTests(TemporaryRepository):
         allowed, reason = approval.check_refs(self.linked, [self.proposed_ref()])
         self.assertFalse(allowed)
         self.assertIn("origin/main changed", reason)
+
+
+class MainBootstrapApprovalTests(TemporaryRepository):
+    """Prove only the first empty-remote main creation can be approved."""
+
+    def setUp(self) -> None:
+        """Point origin at a bare remote that starts without branches."""
+        super().setUp()
+        self.remote = Path(self.temporary.name).resolve() / "origin.git"
+        git(self.root, "init", "--bare", "-q", str(self.remote))
+        git(self.root, "remote", "set-url", "origin", str(self.remote))
+        self.checks = mock.patch.object(
+            approval, "run_bootstrap_checks", return_value=(True, "ok")
+        )
+        self.checks_mock = self.checks.start()
+        self.addCleanup(self.checks.stop)
+
+    def bootstrap_ref(self, *, source: str = "refs/heads/main") -> str:
+        """Return one proposed pre-push main-bootstrap update."""
+        head = git(self.root, "rev-parse", "main")
+        return f"{source} {head} refs/heads/main {'0' * 40}"
+
+    def approve(self) -> None:
+        """Issue the exact main-bootstrap approval for local main."""
+        approval.issue_main_bootstrap(
+            self.root, approval.BOOTSTRAP_APPROVAL_PHRASE
+        )
+
+    def test_empty_remote_with_valid_bootstrap_approval_is_allowed(self) -> None:
+        """Accept the exact first remote-main creation."""
+        self.approve()
+        allowed, _ = approval.check_main_bootstrap_refs(
+            self.root, [self.bootstrap_ref()]
+        )
+        self.assertTrue(allowed)
+
+    def test_unchanged_remote_url_fingerprint_is_allowed(self) -> None:
+        """Accept approval while the remote push URL is unchanged."""
+        self.approve()
+        token = json.loads(approval.bootstrap_state_path(self.root).read_text())
+        self.assertEqual(
+            token["remote_push_url_sha256"],
+            approval.remote_push_url_fingerprint(self.root, "origin"),
+        )
+        self.assertTrue(
+            approval.check_main_bootstrap_refs(self.root, [self.bootstrap_ref()])[0]
+        )
+
+    def test_no_approval_is_rejected(self) -> None:
+        """Reject bootstrap when no deliberate approval was recorded."""
+        allowed, _ = approval.check_main_bootstrap_refs(
+            self.root, [self.bootstrap_ref()]
+        )
+        self.assertFalse(allowed)
+
+    def test_wrong_approval_phrase_is_rejected(self) -> None:
+        """Require the exact bootstrap approval phrase."""
+        with self.assertRaises(RuntimeError):
+            approval.issue_main_bootstrap(self.root, "APPROVE PUSH")
+
+    def test_approval_for_another_commit_is_rejected(self) -> None:
+        """Bind bootstrap approval to the exact local main commit."""
+        self.approve()
+        (self.root / "later.txt").write_text("later\n", encoding="utf-8")
+        git(self.root, "add", "later.txt")
+        git(self.root, "commit", "-qm", "chore: later main")
+        allowed, reason = approval.check_main_bootstrap_refs(
+            self.root, [self.bootstrap_ref()]
+        )
+        self.assertFalse(allowed)
+        self.assertIn("another commit", reason)
+
+    def test_dirty_worktree_is_rejected(self) -> None:
+        """Require a clean local main worktree for bootstrap."""
+        self.approve()
+        (self.root / "dirty.txt").write_text("dirty\n", encoding="utf-8")
+        allowed, reason = approval.check_main_bootstrap_refs(
+            self.root, [self.bootstrap_ref()]
+        )
+        self.assertFalse(allowed)
+        self.assertIn("clean worktree", reason)
+
+    def test_multiple_pushed_refs_are_rejected(self) -> None:
+        """Permit only one ref update during bootstrap."""
+        self.approve()
+        line = self.bootstrap_ref()
+        self.assertFalse(approval.check_main_bootstrap_refs(self.root, [line, line])[0])
+
+    def test_non_main_source_is_rejected(self) -> None:
+        """Require local refs/heads/main as the pushed source."""
+        self.approve()
+        allowed, reason = approval.check_main_bootstrap_refs(
+            self.root, [self.bootstrap_ref(source="refs/heads/chore/task")]
+        )
+        self.assertFalse(allowed)
+        self.assertIn("source", reason)
+
+    def test_remote_main_already_exists_is_rejected(self) -> None:
+        """Reject bootstrap after remote main exists."""
+        git(self.root, "push", "-q", "origin", "main:refs/heads/main")
+        with self.assertRaises(RuntimeError):
+            self.approve()
+
+    def test_remote_contains_another_branch_is_rejected(self) -> None:
+        """Reject bootstrap when any remote branch already exists."""
+        git(self.root, "push", "-q", "origin", "main:refs/heads/other")
+        with self.assertRaises(RuntimeError):
+            self.approve()
+
+    def test_remote_lookup_failure_is_rejected(self) -> None:
+        """Treat lookup and authentication failures as unsafe."""
+        git(self.root, "remote", "set-url", "origin", str(self.remote / "missing"))
+        with self.assertRaises(RuntimeError):
+            self.approve()
+
+    def test_repointing_origin_invalidates_approval(self) -> None:
+        """Reject approval reuse after origin points to a different empty remote."""
+        self.approve()
+        other = Path(self.temporary.name).resolve() / "other.git"
+        git(self.root, "init", "--bare", "-q", str(other))
+        git(self.root, "remote", "set-url", "origin", str(other))
+        allowed, reason = approval.check_main_bootstrap_refs(
+            self.root, [self.bootstrap_ref()]
+        )
+        self.assertFalse(allowed)
+        self.assertIn("remote URL", reason)
+
+    def test_another_remote_name_with_different_url_cannot_reuse_approval(self) -> None:
+        """Reject another remote name that points at a different URL."""
+        self.approve()
+        other = Path(self.temporary.name).resolve() / "other.git"
+        git(self.root, "init", "--bare", "-q", str(other))
+        git(self.root, "remote", "add", "backup", str(other))
+        allowed, reason = approval.check_main_bootstrap_refs(
+            self.root, [self.bootstrap_ref()], "backup"
+        )
+        self.assertFalse(allowed)
+        self.assertIn("another remote", reason)
+
+    def test_push_url_lookup_failure_during_validation_is_rejected(self) -> None:
+        """Reject when the approved remote disappears before push."""
+        self.approve()
+        git(self.root, "remote", "remove", "origin")
+        allowed, reason = approval.check_main_bootstrap_refs(
+            self.root, [self.bootstrap_ref()]
+        )
+        self.assertFalse(allowed)
+        self.assertIn("push URL", reason)
+
+    def test_ordinary_direct_push_to_existing_main_remains_rejected(self) -> None:
+        """Keep normal direct pushes to main forbidden after bootstrap."""
+        git(self.root, "push", "-q", "origin", "main:refs/heads/main")
+        head = git(self.root, "rev-parse", "main")
+        line = f"refs/heads/main {head} refs/heads/main {head}"
+        self.assertFalse(approval.check_main_bootstrap_refs(self.root, [line])[0])
+
+    def test_secret_scan_failure_remains_blocking(self) -> None:
+        """Reject bootstrap when the required checks fail."""
+        self.checks_mock.return_value = (False, "secret scan failed")
+        with self.assertRaises(RuntimeError):
+            self.approve()
+
+    def test_post_authorization_failure_consumes_approval(self) -> None:
+        """Consume approval before later hook validation can fail."""
+        self.approve()
+        self.assertTrue(
+            approval.check_main_bootstrap_refs(self.root, [self.bootstrap_ref()])[0]
+        )
+        self.assertTrue(approval.consume_main_bootstrap(self.root))
+        allowed, _ = approval.check_main_bootstrap_refs(
+            self.root, [self.bootstrap_ref()]
+        )
+        self.assertFalse(allowed)
+
+
+class MainBootstrapHookIntegrationTests(unittest.TestCase):
+    """Exercise the real pre-push hook against a local bare remote."""
+
+    def setUp(self) -> None:
+        """Create a repository with copied governance hooks."""
+        self.temporary = tempfile.TemporaryDirectory(prefix="governance-hook-")
+        self.root = Path(self.temporary.name).resolve() / "repo"
+        self.remote = Path(self.temporary.name).resolve() / "origin.git"
+        self.root.mkdir()
+        git(self.root, "init", "-q")
+        git(self.root, "config", "user.email", "governance@example.test")
+        git(self.root, "config", "user.name", "Governance Test")
+        git(self.root, "init", "--bare", "-q", str(self.remote))
+        git(self.root, "remote", "add", "origin", str(self.remote))
+        (self.root / ".gitignore").write_text("__pycache__/\n*.pyc\n", encoding="utf-8")
+        self.copy_governance_files()
+
+    def tearDown(self) -> None:
+        """Remove the disposable hook repository."""
+        self.temporary.cleanup()
+
+    def copy_governance_files(self) -> None:
+        """Copy real governance code while stubbing recursive tests."""
+        shutil.copytree(
+            ROOT / ".githooks",
+            self.root / ".githooks",
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        )
+        shutil.copytree(
+            ROOT / ".governance",
+            self.root / ".governance",
+            ignore=shutil.ignore_patterns("state", "__pycache__", "*.pyc"),
+        )
+        tests = self.root / ".governance" / "tests"
+        tests.mkdir(exist_ok=True)
+        (tests / "test_governance.py").write_text(
+            "import unittest\n\n"
+            "class BootstrapFixtureTests(unittest.TestCase):\n"
+            "    def test_ok(self):\n"
+            "        self.assertTrue(True)\n\n"
+            "if __name__ == '__main__':\n"
+            "    unittest.main()\n",
+            encoding="utf-8",
+        )
+
+    def run_git(self, *arguments: str, check: bool = True) -> subprocess.CompletedProcess:
+        """Run Git in the integration repository."""
+        return subprocess.run(
+            ["git", *arguments],
+            cwd=self.root,
+            capture_output=True,
+            text=True,
+            check=check,
+        )
+
+    def commit_file(self, name: str, content: str, *, valid_message: bool = True) -> str:
+        """Create one local main commit and return its SHA."""
+        (self.root / name).write_text(content, encoding="utf-8")
+        self.run_git("add", name, ".gitignore", ".githooks", ".governance")
+        if valid_message:
+            self.run_git(
+                "-c",
+                "core.hooksPath=",
+                "commit",
+                "-qm",
+                "chore(governance): update bootstrap fixture",
+                "-m",
+                "Details:",
+                "-m",
+                "Update the local hook integration fixture.",
+            )
+        else:
+            self.run_git("-c", "core.hooksPath=", "commit", "-qm", "bad")
+        self.run_git("branch", "-M", "main")
+        return git(self.root, "rev-parse", "HEAD")
+
+    def approve_bootstrap(self) -> subprocess.CompletedProcess:
+        """Issue the exact bootstrap approval using the copied script."""
+        result = subprocess.run(
+            [
+                sys.executable,
+                ".governance/approval.py",
+                "issue-main-bootstrap",
+                approval.BOOTSTRAP_APPROVAL_PHRASE,
+            ],
+            cwd=self.root,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        return result
+
+    def test_first_real_main_push_succeeds_and_second_is_rejected(self) -> None:
+        """Allow only the first approved main push through the real hook."""
+        first = self.commit_file("base.txt", "base\n")
+        self.run_git("config", "core.hooksPath", ".githooks")
+        self.assertEqual("", git(self.root, "ls-remote", "--heads", "origin"))
+        self.approve_bootstrap()
+
+        self.run_git("push", "--set-upstream", "origin", "main")
+        self.assertEqual(first, git(self.root, "rev-parse", "origin/main"))
+
+        self.commit_file("later.txt", "later\n")
+        rejected = self.run_git("push", "origin", "main", check=False)
+        self.assertNotEqual(0, rejected.returncode)
+        self.assertEqual(first, git(self.root, "rev-parse", "origin/main"))
+
+    def test_post_authorization_hook_failure_consumes_approval(self) -> None:
+        """Consume approval before a later hook validation failure exits."""
+        self.commit_file("bad.txt", "bad\n", valid_message=False)
+        self.run_git("config", "core.hooksPath", ".githooks")
+        self.approve_bootstrap()
+
+        rejected = self.run_git("push", "--set-upstream", "origin", "main", check=False)
+        self.assertNotEqual(0, rejected.returncode)
+        self.assertFalse(approval.bootstrap_state_path(self.root).exists())
+
+        retry = self.run_git("push", "--set-upstream", "origin", "main", check=False)
+        self.assertNotEqual(0, retry.returncode)
+        self.assertEqual("", git(self.root, "ls-remote", "--heads", "origin"))
 
 
 class CommitValidationTests(TemporaryRepository):
