@@ -30,8 +30,8 @@ fi
 if grep -Eq 'refs/heads/main( |$)' "$REFS"; then
     if PYTHONDONTWRITEBYTECODE=1 "$PYTHON" "$APPROVAL_LIB" check-main-bootstrap-refs "$REFS" "${1:-origin}"; then
         PYTHONDONTWRITEBYTECODE=1 "$PYTHON" "$APPROVAL_LIB" consume-main-bootstrap
-        while read -r _local_ref local_sha _remote_ref remote_sha; do
-            PYTHONDONTWRITEBYTECODE=1 "$PYTHON" "$MESSAGE_CHECKER" push-commits "$local_sha" "$remote_sha"
+        while read -r _local_ref local_sha _remote_ref _remote_sha; do
+            PYTHONDONTWRITEBYTECODE=1 "$PYTHON" "$MESSAGE_CHECKER" bootstrap-tip "$local_sha"
         done <"$REFS"
         exit 0
     fi

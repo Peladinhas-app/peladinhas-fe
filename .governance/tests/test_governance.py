@@ -462,6 +462,16 @@ class MainBootstrapHookIntegrationTests(unittest.TestCase):
         self.run_git("branch", "-M", "main")
         return git(self.root, "rev-parse", "HEAD")
 
+    def remote_commit_message(self, commit: str) -> str:
+        """Read one commit message from the bare test remote."""
+        result = subprocess.run(
+            ["git", "--git-dir", str(self.remote), "show", "-s", "--format=%B", commit],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return result.stdout.strip()
+
     def approve_bootstrap(self) -> subprocess.CompletedProcess:
         """Issue the exact bootstrap approval using the copied script."""
         result = subprocess.run(
@@ -480,6 +490,7 @@ class MainBootstrapHookIntegrationTests(unittest.TestCase):
 
     def test_first_real_main_push_succeeds_and_second_is_rejected(self) -> None:
         """Allow only the first approved main push through the real hook."""
+        legacy = self.commit_file("legacy.txt", "legacy\n", valid_message=False)
         first = self.commit_file("base.txt", "base\n")
         self.run_git("config", "core.hooksPath", ".githooks")
         self.assertEqual("", git(self.root, "ls-remote", "--heads", "origin"))
@@ -487,6 +498,7 @@ class MainBootstrapHookIntegrationTests(unittest.TestCase):
 
         self.run_git("push", "--set-upstream", "origin", "main")
         self.assertEqual(first, git(self.root, "rev-parse", "origin/main"))
+        self.assertEqual("bad", self.remote_commit_message(legacy))
 
         self.commit_file("later.txt", "later\n")
         rejected = self.run_git("push", "origin", "main", check=False)
@@ -494,17 +506,36 @@ class MainBootstrapHookIntegrationTests(unittest.TestCase):
         self.assertEqual(first, git(self.root, "rev-parse", "origin/main"))
 
     def test_post_authorization_hook_failure_consumes_approval(self) -> None:
-        """Consume approval before a later hook validation failure exits."""
+        """Consume approval before a current-tip message failure exits."""
+        self.commit_file("legacy.txt", "legacy\n", valid_message=False)
         self.commit_file("bad.txt", "bad\n", valid_message=False)
         self.run_git("config", "core.hooksPath", ".githooks")
         self.approve_bootstrap()
 
         rejected = self.run_git("push", "--set-upstream", "origin", "main", check=False)
         self.assertNotEqual(0, rejected.returncode)
+        self.assertIn("message-structure", rejected.stderr)
         self.assertFalse(approval.bootstrap_state_path(self.root).exists())
 
         retry = self.run_git("push", "--set-upstream", "origin", "main", check=False)
         self.assertNotEqual(0, retry.returncode)
+        self.assertEqual("", git(self.root, "ls-remote", "--heads", "origin"))
+
+    def test_ordinary_non_main_push_still_checks_every_commit_message(self) -> None:
+        """Reject ordinary branch pushes with legacy-format commits."""
+        self.commit_file("legacy.txt", "legacy\n", valid_message=False)
+        self.commit_file("tip.txt", "tip\n")
+        self.run_git("switch", "-c", "feature/message-check")
+        self.run_git("config", "core.hooksPath", ".githooks")
+
+        rejected = self.run_git(
+            "push",
+            "origin",
+            "feature/message-check",
+            check=False,
+        )
+        self.assertNotEqual(0, rejected.returncode)
+        self.assertIn("message-structure: commit", rejected.stderr)
         self.assertEqual("", git(self.root, "ls-remote", "--heads", "origin"))
 
 
@@ -606,6 +637,33 @@ class CommitValidationTests(TemporaryRepository):
             )
         )
         self.assertTrue(message_structure.branch_name_problems("codex/bad-branch"))
+
+    def test_bootstrap_tip_message_check_ignores_legacy_history_only(self) -> None:
+        """Allow a compliant bootstrap tip while ordinary push checks stay strict."""
+        legacy = self.make_worktree("chore/governance-message-fixture")
+        (legacy / "legacy.txt").write_text("legacy\n", encoding="utf-8")
+        git(legacy, "add", "legacy.txt")
+        git(legacy, "commit", "-qm", "legacy")
+        (legacy / "tip.txt").write_text("tip\n", encoding="utf-8")
+        git(legacy, "add", "tip.txt")
+        git(
+            legacy,
+            "commit",
+            "-qm",
+            "chore(governance): update bootstrap tip",
+            "-m",
+            "Details:",
+            "-m",
+            "Check only the bootstrap tip commit message.",
+        )
+        head = git(legacy, "rev-parse", "HEAD")
+        previous = Path.cwd()
+        try:
+            os.chdir(legacy)
+            self.assertEqual([], message_structure.validate_tip_commit(head))
+            self.assertTrue(message_structure.validate_push_commits(head, "0" * 40))
+        finally:
+            os.chdir(previous)
 
 
 class ObjectiveRuleTests(unittest.TestCase):

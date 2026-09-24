@@ -31,3 +31,10 @@ checks pass. The approval is consumed immediately after those bootstrap
 authorization checks pass, before later validation runs. If a later validation
 step fails, issue a fresh approval before retrying. Any later direct push to
 remote `main` is rejected.
+
+During this approved first bootstrap only, historical commit-message formatting
+from before the current `Details:` rule is grandfathered. The exact pushed tip
+commit must still satisfy the current commit-message rule, and code checks,
+secret scanning, remote emptiness, clean-worktree validation, and all other
+bootstrap authorization checks still run. This exception is unreachable once the
+remote has any branch head and does not apply to ordinary branch pushes.
