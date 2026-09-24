@@ -5,7 +5,7 @@ import 'auth/app_session_controller.dart';
 import 'auth/peladinhas_auth_service.dart';
 import 'config/development_config.dart';
 import 'network/peladinhas_api_client.dart';
-import 'screens/auth_integration_screen.dart';
+import 'screens/app_entry_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -56,11 +56,7 @@ class PeladinhasApp extends StatelessWidget {
 }
 
 class AuthIntegrationBootstrap extends StatefulWidget {
-  const AuthIntegrationBootstrap({
-    super.key,
-    this.authService,
-    this.apiClient,
-  });
+  const AuthIntegrationBootstrap({super.key, this.authService, this.apiClient});
 
   final PeladinhasAuthService? authService;
   final PeladinhasApiClient? apiClient;
@@ -79,8 +75,8 @@ class _AuthIntegrationBootstrapState extends State<AuthIntegrationBootstrap> {
   void initState() {
     super.initState();
     _authService = widget.authService ?? SupabasePeladinhasAuthService();
-    _apiClient = widget.apiClient ??
-        PeladinhasApiClient(tokenProvider: _authService);
+    _apiClient =
+        widget.apiClient ?? PeladinhasApiClient(tokenProvider: _authService);
     _sessionController = AppSessionController(
       authService: _authService,
       apiClient: _apiClient,
@@ -96,7 +92,7 @@ class _AuthIntegrationBootstrapState extends State<AuthIntegrationBootstrap> {
 
   @override
   Widget build(BuildContext context) {
-    return AuthIntegrationScreen(
+    return AppEntryScreen(
       sessionController: _sessionController,
       apiClient: _apiClient,
     );
