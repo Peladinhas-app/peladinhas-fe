@@ -1,17 +1,19 @@
-# peladinhas
+# Peladinhas Flutter frontend
 
-A new Flutter project.
+Flutter frontend for Peladinhas.
 
-## Getting Started
+## Local development
 
-This project is a starting point for a Flutter application.
+Runtime configuration is supplied with Flutter `--dart-define` values:
 
-A few resources to get you started if this is your first Flutter project:
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
+- `BACKEND_API_BASE_URL`
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+No Supabase key, password, token, or local environment file should be committed
+to this repository.
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## Public test deployment
+
+Firebase Hosting setup and deployment commands are documented in
+[`docs/firebase-hosting-deployment.md`](docs/firebase-hosting-deployment.md).
