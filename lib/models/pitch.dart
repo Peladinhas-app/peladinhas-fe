@@ -3,17 +3,26 @@ class Pitch {
     required this.id,
     required this.name,
     this.address,
+    this.basePrice,
+    this.currency,
+    this.active,
   });
 
   final String id;
   final String name;
   final String? address;
+  final num? basePrice;
+  final String? currency;
+  final bool? active;
 
   factory Pitch.fromJson(Map<String, dynamic> json) {
     return Pitch(
       id: json['id'].toString(),
-      name: json['name']?.toString() ?? 'Test pitch',
+      name: json['name']?.toString() ?? 'Pitch',
       address: json['address']?.toString(),
+      basePrice: json['basePrice'] as num?,
+      currency: json['currency']?.toString(),
+      active: json['active'] as bool?,
     );
   }
 }
