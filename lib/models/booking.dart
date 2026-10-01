@@ -6,6 +6,12 @@ class Booking {
     required this.status,
     required this.totalPrice,
     required this.currency,
+    this.startsAt,
+    this.endsAt,
+    this.createdAt,
+    this.confirmedAt,
+    this.rejectedAt,
+    this.cancelledAt,
   });
 
   final String id;
@@ -14,6 +20,12 @@ class Booking {
   final String status;
   final num totalPrice;
   final String currency;
+  final DateTime? startsAt;
+  final DateTime? endsAt;
+  final DateTime? createdAt;
+  final DateTime? confirmedAt;
+  final DateTime? rejectedAt;
+  final DateTime? cancelledAt;
 
   factory Booking.fromJson(Map<String, dynamic> json) {
     return Booking(
@@ -23,7 +35,17 @@ class Booking {
       status: json['status'].toString(),
       totalPrice: json['totalPrice'] as num? ?? 0,
       currency: json['currency']?.toString() ?? 'EUR',
+      startsAt: _parseDate(json['startsAt']),
+      endsAt: _parseDate(json['endsAt']),
+      createdAt: _parseDate(json['createdAt']),
+      confirmedAt: _parseDate(json['confirmedAt']),
+      rejectedAt: _parseDate(json['rejectedAt']),
+      cancelledAt: _parseDate(json['cancelledAt']),
     );
+  }
+
+  static DateTime? _parseDate(Object? value) {
+    return value == null ? null : DateTime.tryParse(value.toString());
   }
 }
 

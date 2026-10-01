@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:peladinhas/auth/peladinhas_auth_service.dart';
 import 'package:peladinhas/models/match.dart';
+import 'package:peladinhas/models/user_profile.dart';
 import 'package:peladinhas/network/peladinhas_api_client.dart';
 
 void main() {
@@ -63,6 +64,106 @@ void main() {
     await client.getProfile();
 
     expect(captured.headers['Authorization'], 'Bearer test-token');
+  });
+
+  test('creates pitch owner profile with backend account fields', () async {
+    late Map<String, dynamic> body;
+    final client = PeladinhasApiClient(
+      baseUrl: 'http://localhost:8080/api/v1',
+      tokenProvider: _FakeTokenProvider('test-token'),
+      httpClient: MockClient((request) async {
+        body = jsonDecode(request.body) as Map<String, dynamic>;
+        return http.Response(_profileJson(pitchOwner: true), 201);
+      }),
+    );
+
+    final profile = await client.createProfile(
+      const CreateProfileRequest(
+        name: 'Owner',
+        preferredLanguage: 'en',
+        accountType: AccountUseChoice.pitchOwner,
+        ownerInvitationCode: ' CODE-1 ',
+      ),
+    );
+
+    expect(body['accountType'], 'PITCH_OWNER');
+    expect(body['ownerInvitationCode'], 'CODE-1');
+    expect(profile.capabilities.pitchOwner, isTrue);
+  });
+
+  test('activates pitch owner capability using invitationCode', () async {
+    late Map<String, dynamic> body;
+    final client = PeladinhasApiClient(
+      baseUrl: 'http://localhost:8080/api/v1',
+      tokenProvider: _FakeTokenProvider('test-token'),
+      httpClient: MockClient((request) async {
+        expect(request.url.path, '/api/v1/profile/pitch-owner');
+        body = jsonDecode(request.body) as Map<String, dynamic>;
+        return http.Response(_profileJson(pitchOwner: true), 200);
+      }),
+    );
+
+    final profile = await client.activatePitchOwner(' OWNER-CODE ');
+
+    expect(body, {'invitationCode': 'OWNER-CODE'});
+    expect(profile.capabilities.pitchOwner, isTrue);
+  });
+
+  test('loads owner pitches and bookings', () async {
+    final client = PeladinhasApiClient(
+      baseUrl: 'http://localhost:8080/api/v1',
+      tokenProvider: _FakeTokenProvider('test-token'),
+      httpClient: MockClient((request) async {
+        if (request.url.path.endsWith('/pitches/mine')) {
+          return http.Response(
+            jsonEncode([
+              {
+                'id': 'pitch-1',
+                'ownerUserId': 'owner-1',
+                'name': 'Central Pitch',
+                'address': 'Lisbon',
+                'basePrice': 60,
+                'currency': 'EUR',
+                'active': true,
+              },
+            ]),
+            200,
+          );
+        }
+        return http.Response(
+          jsonEncode([
+            {
+              'id': 'booking-1',
+              'matchId': 'match-1',
+              'pitchId': 'pitch-1',
+              'startsAt': '2026-09-30T10:00:00Z',
+              'endsAt': '2026-09-30T11:00:00Z',
+              'totalPrice': 60,
+              'currency': 'EUR',
+              'status': 'provisional',
+            },
+          ]),
+          200,
+        );
+      }),
+    );
+
+    final pitches = await client.getMyPitches();
+    final bookings = await client.getOwnerBookings();
+
+    expect(pitches.single.name, 'Central Pitch');
+    expect(bookings.single.status, 'provisional');
+    expect(bookings.single.startsAt, isNotNull);
+  });
+}
+
+String _profileJson({bool pitchOwner = false}) {
+  return jsonEncode({
+    'id': 'user-1',
+    'email': 'test@example.com',
+    'name': 'Test User',
+    'preferredLanguage': 'en',
+    'capabilities': {'player': true, 'pitchOwner': pitchOwner},
   });
 }
 

@@ -83,6 +83,13 @@ class PeladinhasApiClient {
     return UserProfile.fromJson(_decodeObject(response));
   }
 
+  Future<UserProfile> activatePitchOwner(String invitationCode) async {
+    final response = await _post('/profile/pitch-owner', {
+      'invitationCode': invitationCode.trim(),
+    });
+    return UserProfile.fromJson(_decodeObject(response));
+  }
+
   Future<Match> createDirectMatch(CreateDirectMatchRequest request) async {
     final response = await _post('/matches/direct', request.toJson());
     return Match.fromJson(_decodeObject(response));
@@ -128,6 +135,11 @@ class PeladinhasApiClient {
     return Pitch.fromJson(_decodeObject(response));
   }
 
+  Future<List<Pitch>> getMyPitches() async {
+    final response = await _get('/pitches/mine');
+    return _decodeList(response).map(Pitch.fromJson).toList();
+  }
+
   Future<Map<String, dynamic>> createPitchSchedule({
     required String pitchId,
     required CreatePitchScheduleRequest request,
@@ -157,6 +169,11 @@ class PeladinhasApiClient {
   Future<Booking> createBooking(CreateBookingRequest request) async {
     final response = await _post('/bookings', request.toJson());
     return Booking.fromJson(_decodeObject(response));
+  }
+
+  Future<List<Booking>> getOwnerBookings() async {
+    final response = await _get('/bookings/owner');
+    return _decodeList(response).map(Booking.fromJson).toList();
   }
 
   String joinEndpointFor(JoinMode joinMode, String matchId) {
@@ -219,6 +236,23 @@ class PeladinhasApiClient {
       const ApiError(
         code: 'invalid_response',
         message: 'The backend response was not a JSON object.',
+      ),
+      response.statusCode,
+    );
+  }
+
+  List<Map<String, dynamic>> _decodeList(http.Response response) {
+    final decoded = jsonDecode(response.body);
+    if (decoded is List) {
+      return decoded
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .toList();
+    }
+    throw PeladinhasApiException(
+      const ApiError(
+        code: 'invalid_response',
+        message: 'The backend response was not a JSON array.',
       ),
       response.statusCode,
     );

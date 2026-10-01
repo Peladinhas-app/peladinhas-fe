@@ -6,6 +6,7 @@ import '../models/booking.dart';
 import '../models/match.dart';
 import '../models/participant.dart';
 import '../models/pitch.dart';
+import '../models/user_profile.dart';
 import '../network/peladinhas_api_client.dart';
 
 class AuthIntegrationScreen extends StatefulWidget {
@@ -80,6 +81,7 @@ class _AuthIntegrationScreenState extends State<AuthIntegrationScreen> {
     await widget.sessionController.signUp(
       email: _emailController.text,
       password: _passwordController.text,
+      accountChoice: AccountUseChoice.player,
     );
   }
 
@@ -107,6 +109,7 @@ class _AuthIntegrationScreenState extends State<AuthIntegrationScreen> {
     await widget.sessionController.createProfile(
       name: _nameController.text,
       preferredLanguage: _preferredLanguage,
+      accountType: AccountUseChoice.player,
     );
   }
 

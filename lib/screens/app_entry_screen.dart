@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../auth/app_session_controller.dart';
 import '../l10n/app_strings.dart';
+import '../models/user_profile.dart';
 import '../network/peladinhas_api_client.dart';
 import 'app_shell_screen.dart';
 
@@ -95,6 +96,7 @@ class _AuthScreen extends StatefulWidget {
 class _AuthScreenState extends State<_AuthScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  AccountUseChoice _accountChoice = AccountUseChoice.player;
 
   @override
   void dispose() {
@@ -143,6 +145,15 @@ class _AuthScreenState extends State<_AuthScreen> {
                     ),
                   ),
                   const SizedBox(height: 16),
+                  _AccountChoiceSelector(
+                    selected: _accountChoice,
+                    onChanged: (choice) =>
+                        setState(() => _accountChoice = choice),
+                    strings: widget.strings,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(widget.strings.pitchOwnerSignupNote),
+                  const SizedBox(height: 16),
                   FilledButton(
                     onPressed: () => widget.controller.signIn(
                       email: _emailController.text,
@@ -155,6 +166,7 @@ class _AuthScreenState extends State<_AuthScreen> {
                     onPressed: () => widget.controller.signUp(
                       email: _emailController.text,
                       password: _passwordController.text,
+                      accountChoice: _accountChoice,
                     ),
                     child: Text(widget.strings.signUp),
                   ),
@@ -186,11 +198,21 @@ class _ProfileOnboardingScreen extends StatefulWidget {
 
 class _ProfileOnboardingScreenState extends State<_ProfileOnboardingScreen> {
   final _nameController = TextEditingController();
+  final _ownerInvitationController = TextEditingController();
   String _preferredLanguage = 'en';
+  late AccountUseChoice _accountChoice;
+
+  @override
+  void initState() {
+    super.initState();
+    _accountChoice =
+        widget.controller.state.pendingAccountChoice ?? AccountUseChoice.player;
+  }
 
   @override
   void dispose() {
     _nameController.dispose();
+    _ownerInvitationController.dispose();
     super.dispose();
   }
 
@@ -248,10 +270,37 @@ class _ProfileOnboardingScreenState extends State<_ProfileOnboardingScreen> {
                     },
                   ),
                   const SizedBox(height: 16),
+                  _AccountChoiceSelector(
+                    selected: _accountChoice,
+                    onChanged: (choice) async {
+                      setState(() => _accountChoice = choice);
+                      await widget.controller.setPendingAccountChoice(choice);
+                    },
+                    strings: widget.strings,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(widget.strings.pitchOwnerSignupNote),
+                  if (_accountChoice == AccountUseChoice.pitchOwner) ...[
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _ownerInvitationController,
+                      decoration: InputDecoration(
+                        labelText: widget.strings.ownerInvitationCode,
+                        helperText: widget.strings.ownerInvitationHelper,
+                        border: const OutlineInputBorder(),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 16),
                   FilledButton(
                     onPressed: () => widget.controller.createProfile(
                       name: _nameController.text,
                       preferredLanguage: _preferredLanguage,
+                      accountType: _accountChoice,
+                      ownerInvitationCode: _accountChoice ==
+                              AccountUseChoice.pitchOwner
+                          ? _ownerInvitationController.text
+                          : null,
                     ),
                     child: Text(widget.strings.createProfile),
                   ),
@@ -261,6 +310,39 @@ class _ProfileOnboardingScreenState extends State<_ProfileOnboardingScreen> {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _AccountChoiceSelector extends StatelessWidget {
+  const _AccountChoiceSelector({
+    required this.selected,
+    required this.onChanged,
+    required this.strings,
+  });
+
+  final AccountUseChoice selected;
+  final ValueChanged<AccountUseChoice> onChanged;
+  final AppStrings strings;
+
+  @override
+  Widget build(BuildContext context) {
+    return SegmentedButton<AccountUseChoice>(
+      segments: [
+        ButtonSegment(
+          value: AccountUseChoice.player,
+          icon: const Icon(Icons.sports_soccer_outlined),
+          label: Text(strings.playerAccount),
+        ),
+        ButtonSegment(
+          value: AccountUseChoice.pitchOwner,
+          icon: const Icon(Icons.stadium_outlined),
+          label: Text(strings.pitchOwnerAccount),
+        ),
+      ],
+      selected: {selected},
+      onSelectionChanged: (selection) => onChanged(selection.first),
+      showSelectedIcon: false,
     );
   }
 }

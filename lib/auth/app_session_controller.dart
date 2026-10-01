@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/auth_session.dart';
 import '../models/user_profile.dart';
@@ -21,6 +22,7 @@ class AppSessionState {
     this.session,
     this.profile,
     this.message,
+    this.pendingAccountChoice,
   });
 
   const AppSessionState.loading() : this(stage: AppSessionStage.loading);
@@ -32,6 +34,7 @@ class AppSessionState {
   final AuthSession? session;
   final UserProfile? profile;
   final String? message;
+  final AccountUseChoice? pendingAccountChoice;
 }
 
 class AppSessionController extends ChangeNotifier {
@@ -43,12 +46,15 @@ class AppSessionController extends ChangeNotifier {
   final PeladinhasAuthService authService;
   final PeladinhasApiClient apiClient;
   StreamSubscription<AuthSession?>? _authSubscription;
+  AccountUseChoice? _pendingAccountChoice;
+  static const _pendingAccountChoiceKey = 'peladinhas.pendingAccountChoice';
 
   AppSessionState _state = const AppSessionState.loading();
 
   AppSessionState get state => _state;
 
   Future<void> start() async {
+    _pendingAccountChoice = await _readPendingAccountChoice();
     _authSubscription = authService.authStateChanges.listen((session) {
       _loadProfileForSession(session);
     });
@@ -58,8 +64,11 @@ class AppSessionController extends ChangeNotifier {
   Future<void> signUp({
     required String email,
     required String password,
+    required AccountUseChoice accountChoice,
   }) async {
     await _runAuthAction(() async {
+      _pendingAccountChoice = accountChoice;
+      await _writePendingAccountChoice(accountChoice);
       final result = await authService.signUp(email: email, password: password);
       if (result.session == null) {
         _setState(AppSessionState(
@@ -92,6 +101,8 @@ class AppSessionController extends ChangeNotifier {
   Future<void> createProfile({
     required String name,
     required String preferredLanguage,
+    required AccountUseChoice accountType,
+    String? ownerInvitationCode,
   }) async {
     final session = _state.session;
     if (session == null) {
@@ -104,7 +115,11 @@ class AppSessionController extends ChangeNotifier {
       final profile = await apiClient.createProfile(CreateProfileRequest(
         name: name,
         preferredLanguage: preferredLanguage,
+        accountType: accountType,
+        ownerInvitationCode: ownerInvitationCode,
       ));
+      _pendingAccountChoice = null;
+      await _clearPendingAccountChoice();
       _setState(AppSessionState(
         stage: AppSessionStage.ready,
         session: session,
@@ -121,6 +136,54 @@ class AppSessionController extends ChangeNotifier {
 
   Future<void> refreshProfile() async {
     await _loadProfileForSession(authService.currentSession);
+  }
+
+  Future<void> setPendingAccountChoice(AccountUseChoice accountChoice) async {
+    _pendingAccountChoice = accountChoice;
+    await _writePendingAccountChoice(accountChoice);
+    if (_state.stage == AppSessionStage.profileMissing) {
+      _setState(AppSessionState(
+        stage: AppSessionStage.profileMissing,
+        session: _state.session,
+        message: _state.message,
+        pendingAccountChoice: accountChoice,
+      ));
+    }
+  }
+
+  Future<void> activatePitchOwner(String invitationCode) async {
+    final session = _state.session;
+    if (session == null) {
+      _setState(const AppSessionState.unauthenticated());
+      return;
+    }
+    _setState(AppSessionState(
+      stage: AppSessionStage.loading,
+      session: session,
+      profile: _state.profile,
+    ));
+    try {
+      final profile = await apiClient.activatePitchOwner(invitationCode);
+      _setState(AppSessionState(
+        stage: AppSessionStage.ready,
+        session: session,
+        profile: profile,
+      ));
+    } on PeladinhasApiException catch (error) {
+      _setState(AppSessionState(
+        stage: AppSessionStage.ready,
+        session: session,
+        profile: _state.profile,
+        message: error.error.displayMessage,
+      ));
+    } catch (error) {
+      _setState(AppSessionState(
+        stage: AppSessionStage.ready,
+        session: session,
+        profile: _state.profile,
+        message: error.toString(),
+      ));
+    }
   }
 
   Future<void> _runAuthAction(Future<void> Function() action) async {
@@ -156,6 +219,7 @@ class AppSessionController extends ChangeNotifier {
           stage: AppSessionStage.profileMissing,
           session: session,
           message: error.error.message,
+          pendingAccountChoice: _pendingAccountChoice,
         ));
         return;
       }
@@ -176,6 +240,24 @@ class AppSessionController extends ChangeNotifier {
   void _setState(AppSessionState state) {
     _state = state;
     notifyListeners();
+  }
+
+  Future<AccountUseChoice?> _readPendingAccountChoice() async {
+    final preferences = await SharedPreferences.getInstance();
+    final value = preferences.getString(_pendingAccountChoiceKey);
+    return AccountUseChoice.values
+        .where((choice) => choice.apiValue == value)
+        .firstOrNull;
+  }
+
+  Future<void> _writePendingAccountChoice(AccountUseChoice accountChoice) async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setString(_pendingAccountChoiceKey, accountChoice.apiValue);
+  }
+
+  Future<void> _clearPendingAccountChoice() async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.remove(_pendingAccountChoiceKey);
   }
 
   @override
