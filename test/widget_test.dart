@@ -12,6 +12,7 @@ import 'package:peladinhas/main.dart';
 import 'package:peladinhas/models/auth_session.dart';
 import 'package:peladinhas/network/peladinhas_api_client.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' as supabase;
 
 void main() {
   setUp(() {
@@ -62,6 +63,69 @@ void main() {
     expect(find.text('Invitation code'), findsOneWidget);
   });
 
+  testWidgets('login auth errors hide raw Supabase details', (tester) async {
+    await tester.pumpWidget(
+      _appWith(
+        auth: _FakeAuthService(
+          signInError: const supabase.AuthException(
+            'Invalid login credentials at https://example.supabase.co/auth/v1',
+            code: 'invalid_credentials',
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Log In'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('The email or password is incorrect.'), findsOneWidget);
+    expect(find.textContaining('AuthException'), findsNothing);
+    expect(find.textContaining('https://'), findsNothing);
+    expect(find.textContaining('example.supabase.co'), findsNothing);
+  });
+
+  testWidgets('signup auth errors hide raw Supabase details', (tester) async {
+    await tester.pumpWidget(
+      _appWith(
+        auth: _FakeAuthService(
+          signUpError: const supabase.AuthException(
+            'User already registered at https://example.supabase.co/auth/v1',
+            code: 'email_exists',
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Sign Up'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('An account already exists for this email.'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('AuthException'), findsNothing);
+    expect(find.textContaining('https://'), findsNothing);
+    expect(find.textContaining('example.supabase.co'), findsNothing);
+  });
+
+  testWidgets('profile loading hides raw technical failures', (tester) async {
+    await tester.pumpWidget(
+      _appWith(
+        auth: _FakeAuthService(current: _session),
+        handler: (request) async => throw _technicalFailure(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('We couldn’t load your profile. Please try again.'),
+      findsOneWidget,
+    );
+    _expectNoTechnicalFailureText();
+  });
+
   testWidgets('routes authenticated users without a profile to onboarding', (
     tester,
   ) async {
@@ -76,6 +140,33 @@ void main() {
     expect(find.text('Create Peladinhas Profile'), findsWidgets);
     expect(find.text('Name'), findsOneWidget);
     expect(find.text('Invitation code'), findsNothing);
+  });
+
+  testWidgets('profile creation hides raw technical failures', (tester) async {
+    await tester.pumpWidget(
+      _appWith(
+        auth: _FakeAuthService(current: _session),
+        handler: (request) async {
+          if (request.method == 'GET') {
+            return _profileMissingResponse(request);
+          }
+          throw _technicalFailure();
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(EditableText).first, 'Test User');
+    await tester.tap(
+      find.widgetWithText(FilledButton, 'Create Peladinhas Profile'),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('We couldn’t create your profile. Please try again.'),
+      findsOneWidget,
+    );
+    _expectNoTechnicalFailureText();
   });
 
   testWidgets('pitch owner onboarding shows code only when required', (
@@ -313,6 +404,37 @@ void main() {
       find.textContaining('owner_invitation_code_invalid'),
       findsOneWidget,
     );
+  });
+
+  testWidgets('owner activation hides raw technical failures', (tester) async {
+    await _useDesktopViewport(tester);
+
+    await tester.pumpWidget(
+      _appWith(
+        auth: _FakeAuthService(current: _session),
+        handler: (request) async {
+          if (request.url.path.endsWith('/profile/pitch-owner')) {
+            throw _technicalFailure();
+          }
+          return _profileResponse()(request);
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Profile'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Activate owner mode'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(EditableText).last, 'OWNER-CODE');
+    await tester.tap(find.text('Activate owner mode'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('We couldn’t activate Pitch Owner mode. Please try again.'),
+      findsOneWidget,
+    );
+    _expectNoTechnicalFailureText();
   });
 
   testWidgets('owner receives switch and keeps player navigation', (
@@ -691,11 +813,32 @@ http.Response _serverError() {
   );
 }
 
+Exception _technicalFailure() {
+  return Exception(
+    'AuthException url=https://internal.example.test token=fake-token '
+    'SQLSTATE backend response details',
+  );
+}
+
+void _expectNoTechnicalFailureText() {
+  expect(find.textContaining('AuthException'), findsNothing);
+  expect(find.textContaining('https://'), findsNothing);
+  expect(find.textContaining('fake-token'), findsNothing);
+  expect(find.textContaining('SQLSTATE'), findsNothing);
+}
+
 class _FakeAuthService implements PeladinhasAuthService {
-  _FakeAuthService({this.current, this.signUpSession});
+  _FakeAuthService({
+    this.current,
+    this.signUpSession,
+    this.signInError,
+    this.signUpError,
+  });
 
   AuthSession? current;
   AuthSession? signUpSession;
+  Object? signInError;
+  Object? signUpError;
   final _controller = StreamController<AuthSession?>.broadcast();
 
   @override
@@ -712,6 +855,10 @@ class _FakeAuthService implements PeladinhasAuthService {
     required String email,
     required String password,
   }) async {
+    final error = signInError;
+    if (error != null) {
+      throw error;
+    }
     current = _session;
     return AuthActionResult(session: current);
   }
@@ -721,6 +868,10 @@ class _FakeAuthService implements PeladinhasAuthService {
     required String email,
     required String password,
   }) async {
+    final error = signUpError;
+    if (error != null) {
+      throw error;
+    }
     current = signUpSession;
     return AuthActionResult(session: current);
   }

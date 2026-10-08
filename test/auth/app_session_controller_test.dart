@@ -10,6 +10,7 @@ import 'package:peladinhas/models/auth_session.dart';
 import 'package:peladinhas/models/user_profile.dart';
 import 'package:peladinhas/network/peladinhas_api_client.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' as supabase;
 
 void main() {
   setUp(() {
@@ -35,17 +36,121 @@ void main() {
     expect(controller.state.profile?.name, 'Test User');
   });
 
+  for (final entry in [
+    MapEntry(
+      supabase.AuthRetryableFetchException(
+        message: 'XMLHttpRequest error for https://example.supabase.co/auth',
+      ),
+      "We couldn’t connect. Please check your connection and try again.",
+    ),
+    MapEntry(
+      const supabase.AuthException(
+        'Invalid login credentials from https://example.supabase.co',
+        code: 'invalid_credentials',
+      ),
+      'The email or password is incorrect.',
+    ),
+    MapEntry(
+      const supabase.AuthException(
+        'Email not confirmed',
+        code: 'email_not_confirmed',
+      ),
+      'Please confirm your email before logging in.',
+    ),
+    MapEntry(
+      const supabase.AuthException(
+        'User already registered',
+        code: 'user_already_exists',
+      ),
+      'An account already exists for this email.',
+    ),
+    MapEntry(
+      const supabase.AuthException(
+        'Too many requests',
+        statusCode: '429',
+        code: 'over_request_rate_limit',
+      ),
+      'Too many attempts. Please wait and try again.',
+    ),
+    MapEntry(
+      const supabase.AuthException(
+        'AuthException(message: secret token abc, url: https://example.test)',
+        code: 'unexpected_failure',
+      ),
+      'Something went wrong. Please try again.',
+    ),
+  ]) {
+    test('login maps auth failure to "${entry.value}"', () async {
+      final auth = _FakeAuthService(signInError: entry.key);
+      final controller = _controllerFor(auth, _profileResponse(200));
+
+      await controller.signIn(email: 'test@example.com', password: 'secret');
+
+      expect(controller.state.stage, AppSessionStage.error);
+      expect(controller.state.message, entry.value);
+      expect(controller.state.message, isNot(contains('AuthException')));
+      expect(controller.state.message, isNot(contains('https://')));
+      expect(controller.state.message, isNot(contains('secret')));
+    });
+  }
+
+  test('signup maps raw auth failure to a safe message', () async {
+    final auth = _FakeAuthService(
+      signUpError: const supabase.AuthException(
+        'User already registered at https://example.supabase.co/auth/v1/signup',
+        code: 'email_exists',
+      ),
+    );
+    final controller = _controllerFor(auth, _profileResponse(200));
+
+    await controller.signUp(
+      email: 'test@example.com',
+      password: 'secret',
+      accountChoice: AccountUseChoice.player,
+    );
+
+    expect(controller.state.stage, AppSessionStage.error);
+    expect(
+      controller.state.message,
+      'An account already exists for this email.',
+    );
+    expect(controller.state.message, isNot(contains('https://')));
+    expect(controller.state.message, isNot(contains('AuthException')));
+  });
+
   test('missing local profile enters onboarding state', () async {
     final auth = _FakeAuthService(signInSession: _session);
-    final controller = _controllerFor(auth, _profileResponse(
-      403,
-      code: 'authenticated_user_not_found',
-      message: 'Create a Peladinhas profile.',
-    ));
+    final controller = _controllerFor(
+      auth,
+      _profileResponse(
+        403,
+        code: 'authenticated_user_not_found',
+        message: 'Create a Peladinhas profile.',
+      ),
+    );
 
     await controller.signIn(email: 'test@example.com', password: 'secret');
 
     expect(controller.state.stage, AppSessionStage.profileMissing);
+  });
+
+  test('profile loading hides generic technical failures', () async {
+    final auth = _FakeAuthService(signInSession: _session);
+    final controller = _controllerFor(auth, (request) async {
+      throw _technicalFailure();
+    });
+
+    await controller.signIn(email: 'test@example.com', password: 'secret');
+
+    expect(controller.state.stage, AppSessionStage.error);
+    expect(
+      controller.state.message,
+      'We couldn’t load your profile. Please try again.',
+    );
+    expect(controller.state.message, isNot(contains('AuthException')));
+    expect(controller.state.message, isNot(contains('https://')));
+    expect(controller.state.message, isNot(contains('token=')));
+    expect(controller.state.message, isNot(contains('SQL')));
   });
 
   test('profile creation makes the session ready', () async {
@@ -54,10 +159,9 @@ void main() {
     final controller = _controllerFor(auth, (request) async {
       requestCount += 1;
       if (request.method == 'GET') {
-        return _profileResponse(
-          403,
-          code: 'authenticated_user_not_found',
-        )(request);
+        return _profileResponse(403, code: 'authenticated_user_not_found')(
+          request,
+        );
       }
       return _profileResponse(200)(request);
     });
@@ -73,48 +177,86 @@ void main() {
     expect(requestCount, 2);
   });
 
-  test('pitch owner profile creation sends account type and invitation', () async {
+  test('profile creation hides generic technical failures', () async {
     final auth = _FakeAuthService(signInSession: _session);
-    Map<String, dynamic>? capturedBody;
     final controller = _controllerFor(auth, (request) async {
       if (request.method == 'GET') {
         return _profileResponse(403, code: 'authenticated_user_not_found')(
           request,
         );
       }
-      capturedBody = jsonDecode(request.body) as Map<String, dynamic>;
-      return _profileResponse(200, pitchOwner: true)(request);
+      throw _technicalFailure();
     });
 
     await controller.signIn(email: 'test@example.com', password: 'secret');
     await controller.createProfile(
-      name: 'Owner User',
-      preferredLanguage: 'pt',
-      accountType: AccountUseChoice.pitchOwner,
-      ownerInvitationCode: ' INVITE-123 ',
+      name: 'Test User',
+      preferredLanguage: 'en',
+      accountType: AccountUseChoice.player,
     );
 
-    expect(capturedBody?['accountType'], 'PITCH_OWNER');
-    expect(capturedBody?['ownerInvitationCode'], 'INVITE-123');
-    expect(controller.state.profile?.capabilities.pitchOwner, isTrue);
+    expect(controller.state.stage, AppSessionStage.error);
+    expect(
+      controller.state.message,
+      'We couldn’t create your profile. Please try again.',
+    );
+    expect(controller.state.message, isNot(contains('AuthException')));
+    expect(controller.state.message, isNot(contains('https://')));
+    expect(controller.state.message, isNot(contains('token=')));
+    expect(controller.state.message, isNot(contains('SQL')));
   });
 
-  test('signup stores pending pitch owner choice through profile lookup', () async {
-    final auth = _FakeAuthService(signInSession: _session);
-    final controller = _controllerFor(
-      auth,
-      _profileResponse(403, code: 'authenticated_user_not_found'),
-    );
+  test(
+    'pitch owner profile creation sends account type and invitation',
+    () async {
+      final auth = _FakeAuthService(signInSession: _session);
+      Map<String, dynamic>? capturedBody;
+      final controller = _controllerFor(auth, (request) async {
+        if (request.method == 'GET') {
+          return _profileResponse(403, code: 'authenticated_user_not_found')(
+            request,
+          );
+        }
+        capturedBody = jsonDecode(request.body) as Map<String, dynamic>;
+        return _profileResponse(200, pitchOwner: true)(request);
+      });
 
-    await controller.signUp(
-      email: 'owner@example.com',
-      password: 'secret',
-      accountChoice: AccountUseChoice.pitchOwner,
-    );
+      await controller.signIn(email: 'test@example.com', password: 'secret');
+      await controller.createProfile(
+        name: 'Owner User',
+        preferredLanguage: 'pt',
+        accountType: AccountUseChoice.pitchOwner,
+        ownerInvitationCode: ' INVITE-123 ',
+      );
 
-    expect(controller.state.stage, AppSessionStage.profileMissing);
-    expect(controller.state.pendingAccountChoice, AccountUseChoice.pitchOwner);
-  });
+      expect(capturedBody?['accountType'], 'PITCH_OWNER');
+      expect(capturedBody?['ownerInvitationCode'], 'INVITE-123');
+      expect(controller.state.profile?.capabilities.pitchOwner, isTrue);
+    },
+  );
+
+  test(
+    'signup stores pending pitch owner choice through profile lookup',
+    () async {
+      final auth = _FakeAuthService(signInSession: _session);
+      final controller = _controllerFor(
+        auth,
+        _profileResponse(403, code: 'authenticated_user_not_found'),
+      );
+
+      await controller.signUp(
+        email: 'owner@example.com',
+        password: 'secret',
+        accountChoice: AccountUseChoice.pitchOwner,
+      );
+
+      expect(controller.state.stage, AppSessionStage.profileMissing);
+      expect(
+        controller.state.pendingAccountChoice,
+        AccountUseChoice.pitchOwner,
+      );
+    },
+  );
 
   test('existing player activation refreshes pitch owner capability', () async {
     final auth = _FakeAuthService(signInSession: _session);
@@ -132,6 +274,30 @@ void main() {
 
     expect(controller.state.stage, AppSessionStage.ready);
     expect(controller.state.profile?.capabilities.pitchOwner, isTrue);
+  });
+
+  test('pitch owner activation hides generic technical failures', () async {
+    final auth = _FakeAuthService(signInSession: _session);
+    final controller = _controllerFor(auth, (request) async {
+      if (request.url.path.endsWith('/profile/pitch-owner')) {
+        throw _technicalFailure();
+      }
+      return _profileResponse(200)(request);
+    });
+
+    await controller.signIn(email: 'test@example.com', password: 'secret');
+    await controller.activatePitchOwner('OWNER-CODE');
+
+    expect(controller.state.stage, AppSessionStage.ready);
+    expect(
+      controller.state.message,
+      'We couldn’t activate Pitch Owner mode. Please try again.',
+    );
+    expect(controller.state.message, isNot(contains('AuthException')));
+    expect(controller.state.message, isNot(contains('https://')));
+    expect(controller.state.message, isNot(contains('token=')));
+    expect(controller.state.message, isNot(contains('SQL')));
+    expect(controller.state.profile?.capabilities.pitchOwner, isFalse);
   });
 
   for (final code in [
@@ -225,11 +391,20 @@ Future<http.Response> Function(http.Request request) _profileResponse(
   };
 }
 
+Exception _technicalFailure() {
+  return Exception(
+    'AuthException url=https://internal.example.test token=fake-token '
+    'SQLSTATE backend response details',
+  );
+}
+
 class _FakeAuthService implements PeladinhasAuthService {
-  _FakeAuthService({this.signInSession});
+  _FakeAuthService({this.signInSession, this.signInError, this.signUpError});
 
   AuthSession? current;
   AuthSession? signInSession;
+  Object? signInError;
+  Object? signUpError;
   final _controller = StreamController<AuthSession?>.broadcast();
 
   @override
@@ -246,6 +421,10 @@ class _FakeAuthService implements PeladinhasAuthService {
     required String email,
     required String password,
   }) async {
+    final error = signInError;
+    if (error != null) {
+      throw error;
+    }
     current = signInSession;
     return AuthActionResult(session: current);
   }
@@ -255,6 +434,10 @@ class _FakeAuthService implements PeladinhasAuthService {
     required String email,
     required String password,
   }) async {
+    final error = signUpError;
+    if (error != null) {
+      throw error;
+    }
     current = signInSession;
     return AuthActionResult(session: current);
   }

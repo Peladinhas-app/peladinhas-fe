@@ -8,13 +8,7 @@ import '../models/user_profile.dart';
 import '../network/peladinhas_api_client.dart';
 import 'peladinhas_auth_service.dart';
 
-enum AppSessionStage {
-  loading,
-  unauthenticated,
-  profileMissing,
-  ready,
-  error,
-}
+enum AppSessionStage { loading, unauthenticated, profileMissing, ready, error }
 
 class AppSessionState {
   const AppSessionState({
@@ -28,7 +22,7 @@ class AppSessionState {
   const AppSessionState.loading() : this(stage: AppSessionStage.loading);
 
   const AppSessionState.unauthenticated()
-      : this(stage: AppSessionStage.unauthenticated);
+    : this(stage: AppSessionStage.unauthenticated);
 
   final AppSessionStage stage;
   final AuthSession? session;
@@ -38,10 +32,7 @@ class AppSessionState {
 }
 
 class AppSessionController extends ChangeNotifier {
-  AppSessionController({
-    required this.authService,
-    required this.apiClient,
-  });
+  AppSessionController({required this.authService, required this.apiClient});
 
   final PeladinhasAuthService authService;
   final PeladinhasApiClient apiClient;
@@ -71,21 +62,19 @@ class AppSessionController extends ChangeNotifier {
       await _writePendingAccountChoice(accountChoice);
       final result = await authService.signUp(email: email, password: password);
       if (result.session == null) {
-        _setState(AppSessionState(
-          stage: AppSessionStage.unauthenticated,
-          message: result.message ??
-              'Check your email to confirm the Supabase account before logging in.',
-        ));
+        _setState(
+          AppSessionState(
+            stage: AppSessionStage.unauthenticated,
+            message: result.message ?? 'Check your email to confirm the Supabase account before logging in.',
+          ),
+        );
         return;
       }
       await _loadProfileForSession(result.session);
     });
   }
 
-  Future<void> signIn({
-    required String email,
-    required String password,
-  }) async {
+  Future<void> signIn({required String email, required String password}) async {
     await _runAuthAction(() async {
       final result = await authService.signIn(email: email, password: password);
       await _loadProfileForSession(result.session);
@@ -110,27 +99,35 @@ class AppSessionController extends ChangeNotifier {
       return;
     }
 
-    _setState(AppSessionState(stage: AppSessionStage.loading, session: session));
+    _setState(
+      AppSessionState(stage: AppSessionStage.loading, session: session),
+    );
     try {
-      final profile = await apiClient.createProfile(CreateProfileRequest(
-        name: name,
-        preferredLanguage: preferredLanguage,
-        accountType: accountType,
-        ownerInvitationCode: ownerInvitationCode,
-      ));
+      final profile = await apiClient.createProfile(
+        CreateProfileRequest(
+          name: name,
+          preferredLanguage: preferredLanguage,
+          accountType: accountType,
+          ownerInvitationCode: ownerInvitationCode,
+        ),
+      );
       _pendingAccountChoice = null;
       await _clearPendingAccountChoice();
-      _setState(AppSessionState(
-        stage: AppSessionStage.ready,
-        session: session,
-        profile: profile,
-      ));
+      _setState(
+        AppSessionState(
+          stage: AppSessionStage.ready,
+          session: session,
+          profile: profile,
+        ),
+      );
     } catch (error) {
-      _setState(AppSessionState(
-        stage: AppSessionStage.error,
-        session: session,
-        message: error.toString(),
-      ));
+      _setState(
+        AppSessionState(
+          stage: AppSessionStage.error,
+          session: session,
+          message: 'We couldn’t create your profile. Please try again.',
+        ),
+      );
     }
   }
 
@@ -142,12 +139,14 @@ class AppSessionController extends ChangeNotifier {
     _pendingAccountChoice = accountChoice;
     await _writePendingAccountChoice(accountChoice);
     if (_state.stage == AppSessionStage.profileMissing) {
-      _setState(AppSessionState(
-        stage: AppSessionStage.profileMissing,
-        session: _state.session,
-        message: _state.message,
-        pendingAccountChoice: accountChoice,
-      ));
+      _setState(
+        AppSessionState(
+          stage: AppSessionStage.profileMissing,
+          session: _state.session,
+          message: _state.message,
+          pendingAccountChoice: accountChoice,
+        ),
+      );
     }
   }
 
@@ -157,32 +156,40 @@ class AppSessionController extends ChangeNotifier {
       _setState(const AppSessionState.unauthenticated());
       return;
     }
-    _setState(AppSessionState(
-      stage: AppSessionStage.loading,
-      session: session,
-      profile: _state.profile,
-    ));
+    _setState(
+      AppSessionState(
+        stage: AppSessionStage.loading,
+        session: session,
+        profile: _state.profile,
+      ),
+    );
     try {
       final profile = await apiClient.activatePitchOwner(invitationCode);
-      _setState(AppSessionState(
-        stage: AppSessionStage.ready,
-        session: session,
-        profile: profile,
-      ));
+      _setState(
+        AppSessionState(
+          stage: AppSessionStage.ready,
+          session: session,
+          profile: profile,
+        ),
+      );
     } on PeladinhasApiException catch (error) {
-      _setState(AppSessionState(
-        stage: AppSessionStage.ready,
-        session: session,
-        profile: _state.profile,
-        message: error.error.displayMessage,
-      ));
+      _setState(
+        AppSessionState(
+          stage: AppSessionStage.ready,
+          session: session,
+          profile: _state.profile,
+          message: error.error.displayMessage,
+        ),
+      );
     } catch (error) {
-      _setState(AppSessionState(
-        stage: AppSessionStage.ready,
-        session: session,
-        profile: _state.profile,
-        message: error.toString(),
-      ));
+      _setState(
+        AppSessionState(
+          stage: AppSessionStage.ready,
+          session: session,
+          profile: _state.profile,
+          message: 'We couldn’t activate Pitch Owner mode. Please try again.',
+        ),
+      );
     }
   }
 
@@ -191,10 +198,12 @@ class AppSessionController extends ChangeNotifier {
     try {
       await action();
     } catch (error) {
-      _setState(AppSessionState(
-        stage: AppSessionStage.error,
-        message: error.toString(),
-      ));
+      _setState(
+        AppSessionState(
+          stage: AppSessionStage.error,
+          message: safeAuthenticationErrorMessage(error),
+        ),
+      );
     }
   }
 
@@ -204,36 +213,46 @@ class AppSessionController extends ChangeNotifier {
       return;
     }
 
-    _setState(AppSessionState(stage: AppSessionStage.loading, session: session));
+    _setState(
+      AppSessionState(stage: AppSessionStage.loading, session: session),
+    );
     try {
       final profile = await apiClient.getProfile();
-      _setState(AppSessionState(
-        stage: AppSessionStage.ready,
-        session: session,
-        profile: profile,
-      ));
+      _setState(
+        AppSessionState(
+          stage: AppSessionStage.ready,
+          session: session,
+          profile: profile,
+        ),
+      );
     } on PeladinhasApiException catch (error) {
       if (error.statusCode == 403 &&
           error.error.code == 'authenticated_user_not_found') {
-        _setState(AppSessionState(
-          stage: AppSessionStage.profileMissing,
-          session: session,
-          message: error.error.message,
-          pendingAccountChoice: _pendingAccountChoice,
-        ));
+        _setState(
+          AppSessionState(
+            stage: AppSessionStage.profileMissing,
+            session: session,
+            message: error.error.message,
+            pendingAccountChoice: _pendingAccountChoice,
+          ),
+        );
         return;
       }
-      _setState(AppSessionState(
-        stage: AppSessionStage.error,
-        session: session,
-        message: error.error.displayMessage,
-      ));
+      _setState(
+        AppSessionState(
+          stage: AppSessionStage.error,
+          session: session,
+          message: error.error.displayMessage,
+        ),
+      );
     } catch (error) {
-      _setState(AppSessionState(
-        stage: AppSessionStage.error,
-        session: session,
-        message: error.toString(),
-      ));
+      _setState(
+        AppSessionState(
+          stage: AppSessionStage.error,
+          session: session,
+          message: 'We couldn’t load your profile. Please try again.',
+        ),
+      );
     }
   }
 
@@ -250,9 +269,14 @@ class AppSessionController extends ChangeNotifier {
         .firstOrNull;
   }
 
-  Future<void> _writePendingAccountChoice(AccountUseChoice accountChoice) async {
+  Future<void> _writePendingAccountChoice(
+    AccountUseChoice accountChoice,
+  ) async {
     final preferences = await SharedPreferences.getInstance();
-    await preferences.setString(_pendingAccountChoiceKey, accountChoice.apiValue);
+    await preferences.setString(
+      _pendingAccountChoiceKey,
+      accountChoice.apiValue,
+    );
   }
 
   Future<void> _clearPendingAccountChoice() async {
