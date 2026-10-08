@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'auth/app_session_controller.dart';
 import 'auth/peladinhas_auth_service.dart';
 import 'config/development_config.dart';
+import 'design/peladinhas_tokens.dart';
 import 'network/peladinhas_api_client.dart';
 import 'screens/app_entry_screen.dart';
 
@@ -35,16 +36,10 @@ class PeladinhasApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const brandGreen = Color(0xFF167A45);
-
     return MaterialApp(
       title: 'Peladinhas',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: brandGreen),
-        scaffoldBackgroundColor: const Color(0xFFF6F8F4),
-        useMaterial3: true,
-      ),
+      theme: buildPeladinhasTheme(),
       home: hasSupabaseConfig || authService != null
           ? AuthIntegrationBootstrap(
               authService: authService,
