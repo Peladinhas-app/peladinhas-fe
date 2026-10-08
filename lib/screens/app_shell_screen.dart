@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../auth/app_session_controller.dart';
+import '../design/peladinhas_components.dart';
+import '../design/peladinhas_tokens.dart';
 import '../l10n/app_strings.dart';
 import '../models/booking.dart';
 import '../models/match.dart';
@@ -10,10 +12,7 @@ import '../models/pitch.dart';
 import '../network/peladinhas_api_client.dart';
 import 'auth_integration_screen.dart';
 
-enum _AppMode {
-  player,
-  owner;
-}
+enum _AppMode { player, owner }
 
 class AppShellScreen extends StatefulWidget {
   const AppShellScreen({
@@ -59,55 +58,48 @@ class _AppShellScreenState extends State<AppShellScreen> {
       _selectedIndex = 0;
     }
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(strings.appName),
-        actions: [
-          if (ownerCapable)
-            Padding(
-              padding: const EdgeInsets.only(right: 12),
-              child: SegmentedButton<_AppMode>(
-                segments: [
-                  ButtonSegment(
-                    value: _AppMode.player,
-                    icon: const Icon(Icons.sports_soccer_outlined),
-                    label: Text(strings.playerMode),
-                  ),
-                  ButtonSegment(
-                    value: _AppMode.owner,
-                    icon: const Icon(Icons.stadium_outlined),
-                    label: Text(strings.ownerMode),
-                  ),
-                ],
-                selected: {effectiveMode},
-                onSelectionChanged: (selection) => _setMode(selection.first),
-                showSelectedIcon: false,
-              ),
-            ),
-        ],
-      ),
-      body: SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 1100),
-            child: pages[_selectedIndex].child,
-          ),
-        ),
-      ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _selectedIndex,
-        onDestinationSelected: (index) =>
-            setState(() => _selectedIndex = index),
-        destinations: pages
-            .map(
-              (page) => NavigationDestination(
-                icon: Icon(page.icon),
-                selectedIcon: Icon(page.selectedIcon),
-                label: page.label,
-              ),
-            )
-            .toList(),
-      ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        if (PeladinhasBreakpoints.isDesktop(width)) {
+          return _DesktopShell(
+            strings: strings,
+            pages: pages,
+            profileName: profile.name,
+            selectedIndex: _selectedIndex,
+            mode: effectiveMode,
+            ownerCapable: ownerCapable,
+            onHome: () => setState(() => _selectedIndex = 0),
+            onDestinationSelected: (index) =>
+                setState(() => _selectedIndex = index),
+            onModeSelected: _setMode,
+          );
+        }
+        if (PeladinhasBreakpoints.isTablet(width)) {
+          return _TabletShell(
+            strings: strings,
+            pages: pages,
+            selectedIndex: _selectedIndex,
+            mode: effectiveMode,
+            ownerCapable: ownerCapable,
+            onHome: () => setState(() => _selectedIndex = 0),
+            onDestinationSelected: (index) =>
+                setState(() => _selectedIndex = index),
+            onModeSelected: _setMode,
+          );
+        }
+        return _MobileShell(
+          strings: strings,
+          pages: pages,
+          selectedIndex: _selectedIndex,
+          mode: effectiveMode,
+          ownerCapable: ownerCapable,
+          onHome: () => setState(() => _selectedIndex = 0),
+          onDestinationSelected: (index) =>
+              setState(() => _selectedIndex = index),
+          onModeSelected: _setMode,
+        );
+      },
     );
   }
 
@@ -280,6 +272,617 @@ class _ShellPage {
   final Widget child;
 }
 
+class _DesktopShell extends StatelessWidget {
+  const _DesktopShell({
+    required this.strings,
+    required this.pages,
+    required this.profileName,
+    required this.selectedIndex,
+    required this.mode,
+    required this.ownerCapable,
+    required this.onHome,
+    required this.onDestinationSelected,
+    required this.onModeSelected,
+  });
+
+  final AppStrings strings;
+  final List<_ShellPage> pages;
+  final String profileName;
+  final int selectedIndex;
+  final _AppMode mode;
+  final bool ownerCapable;
+  final VoidCallback onHome;
+  final ValueChanged<int> onDestinationSelected;
+  final ValueChanged<_AppMode> onModeSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: PeladinhasColors.background,
+      body: Row(
+        children: [
+          _SidebarNavigation(
+            key: const Key('desktop-sidebar'),
+            strings: strings,
+            pages: pages,
+            profileName: profileName,
+            selectedIndex: selectedIndex,
+            mode: mode,
+            ownerCapable: ownerCapable,
+            compact: false,
+            onHome: onHome,
+            onDestinationSelected: onDestinationSelected,
+            onModeSelected: onModeSelected,
+          ),
+          Expanded(
+            child: Column(
+              children: [
+                _TopBar(
+                  strings: strings,
+                  mode: mode,
+                  ownerCapable: ownerCapable,
+                ),
+                Expanded(child: pages[selectedIndex].child),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TabletShell extends StatelessWidget {
+  const _TabletShell({
+    required this.strings,
+    required this.pages,
+    required this.selectedIndex,
+    required this.mode,
+    required this.ownerCapable,
+    required this.onHome,
+    required this.onDestinationSelected,
+    required this.onModeSelected,
+  });
+
+  final AppStrings strings;
+  final List<_ShellPage> pages;
+  final int selectedIndex;
+  final _AppMode mode;
+  final bool ownerCapable;
+  final VoidCallback onHome;
+  final ValueChanged<int> onDestinationSelected;
+  final ValueChanged<_AppMode> onModeSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: PeladinhasColors.background,
+      body: Row(
+        children: [
+          _SidebarNavigation(
+            key: const Key('tablet-sidebar'),
+            strings: strings,
+            pages: pages,
+            profileName: 'Peladinhas',
+            selectedIndex: selectedIndex,
+            mode: mode,
+            ownerCapable: ownerCapable,
+            compact: true,
+            onHome: onHome,
+            onDestinationSelected: onDestinationSelected,
+            onModeSelected: onModeSelected,
+          ),
+          Expanded(
+            child: Column(
+              children: [
+                _TopBar(
+                  strings: strings,
+                  mode: mode,
+                  ownerCapable: ownerCapable,
+                ),
+                Expanded(child: pages[selectedIndex].child),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MobileShell extends StatelessWidget {
+  const _MobileShell({
+    required this.strings,
+    required this.pages,
+    required this.selectedIndex,
+    required this.mode,
+    required this.ownerCapable,
+    required this.onHome,
+    required this.onDestinationSelected,
+    required this.onModeSelected,
+  });
+
+  final AppStrings strings;
+  final List<_ShellPage> pages;
+  final int selectedIndex;
+  final _AppMode mode;
+  final bool ownerCapable;
+  final VoidCallback onHome;
+  final ValueChanged<int> onDestinationSelected;
+  final ValueChanged<_AppMode> onModeSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: PeladinhasColors.background,
+      appBar: AppBar(
+        backgroundColor: PeladinhasColors.surface,
+        title: InkWell(onTap: onHome, child: const _BrandMark(showName: true)),
+        actions: [
+          if (ownerCapable)
+            Padding(
+              padding: const EdgeInsets.only(right: PeladinhasSpacing.sm),
+              child: _WorkspaceChip(mode: mode, onModeSelected: onModeSelected),
+            ),
+        ],
+      ),
+      body: SafeArea(child: pages[selectedIndex].child),
+      bottomNavigationBar: NavigationBar(
+        key: const Key('mobile-navigation'),
+        selectedIndex: selectedIndex,
+        onDestinationSelected: onDestinationSelected,
+        destinations: pages
+            .map(
+              (page) => NavigationDestination(
+                key: Key(_navKey(page.label)),
+                icon: Icon(page.icon),
+                selectedIcon: Icon(page.selectedIcon),
+                label: page.label,
+              ),
+            )
+            .toList(),
+      ),
+    );
+  }
+}
+
+class _SidebarNavigation extends StatelessWidget {
+  const _SidebarNavigation({
+    super.key,
+    required this.strings,
+    required this.pages,
+    required this.profileName,
+    required this.selectedIndex,
+    required this.mode,
+    required this.ownerCapable,
+    required this.compact,
+    required this.onHome,
+    required this.onDestinationSelected,
+    required this.onModeSelected,
+  });
+
+  final AppStrings strings;
+  final List<_ShellPage> pages;
+  final String profileName;
+  final int selectedIndex;
+  final _AppMode mode;
+  final bool ownerCapable;
+  final bool compact;
+  final VoidCallback onHome;
+  final ValueChanged<int> onDestinationSelected;
+  final ValueChanged<_AppMode> onModeSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final width = compact ? 88.0 : 248.0;
+    return Container(
+      width: width,
+      color: PeladinhasColors.brandDark,
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 14 : PeladinhasSpacing.xxl,
+        vertical: 28,
+      ),
+      child: Column(
+        crossAxisAlignment: compact
+            ? CrossAxisAlignment.center
+            : CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            onTap: onHome,
+            child: _BrandMark(showName: !compact),
+          ),
+          const SizedBox(height: 30),
+          _SidebarSectionLabel(
+            mode == _AppMode.owner ? 'PITCH ADMIN' : 'PLAYER',
+          ),
+          const SizedBox(height: 7),
+          for (var index = 0; index < pages.length; index += 1)
+            _SidebarItem(
+              key: Key(_navKey(pages[index].label)),
+              page: pages[index],
+              selected: selectedIndex == index,
+              compact: compact,
+              nested: index > 0,
+              onTap: () => onDestinationSelected(index),
+            ),
+          if (ownerCapable) ...[
+            const SizedBox(height: 24),
+            const _SidebarSectionLabel('SWITCH WORKSPACE'),
+            const SizedBox(height: 7),
+            _WorkspaceSwitch(
+              mode: mode,
+              compact: compact,
+              onModeSelected: onModeSelected,
+            ),
+          ],
+          const Spacer(),
+          if (!compact) ...[
+            const Divider(color: Color(0x66F7F8F5)),
+            const SizedBox(height: 10),
+            _SidebarProfile(name: profileName, mode: mode),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _BrandMark extends StatelessWidget {
+  const _BrandMark({required this.showName});
+
+  final bool showName;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        DecoratedBox(
+          decoration: BoxDecoration(
+            color: PeladinhasColors.highlight,
+            borderRadius: BorderRadius.circular(PeladinhasRadii.xs),
+          ),
+          child: const SizedBox.square(
+            dimension: 36,
+            child: Center(
+              child: SizedBox(
+                width: 16,
+                height: 3,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: PeladinhasColors.brandDark,
+                    borderRadius: BorderRadius.all(Radius.circular(2)),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+        if (showName) ...[
+          const SizedBox(width: PeladinhasSpacing.md),
+          Flexible(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'PELADINHAS',
+                style: PeladinhasTypography.sectionTitle.copyWith(
+                  color: PeladinhasColors.onDark,
+                  fontSize: 18,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _SidebarSectionLabel extends StatelessWidget {
+  const _SidebarSectionLabel(this.label);
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      label,
+      style: PeladinhasTypography.eyebrow.copyWith(
+        color: PeladinhasColors.highlight,
+      ),
+    );
+  }
+}
+
+class _SidebarItem extends StatelessWidget {
+  const _SidebarItem({
+    super.key,
+    required this.page,
+    required this.selected,
+    required this.compact,
+    required this.nested,
+    required this.onTap,
+  });
+
+  final _ShellPage page;
+  final bool selected;
+  final bool compact;
+  final bool nested;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = selected ? PeladinhasColors.brand : Colors.transparent;
+    final leftPadding = compact ? 0.0 : (nested ? 30.0 : 14.0);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 7),
+      child: Material(
+        color: color,
+        borderRadius: BorderRadius.circular(PeladinhasRadii.xs),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(PeladinhasRadii.xs),
+          child: SizedBox(
+            height: 40,
+            width: compact ? 52 : 184,
+            child: Padding(
+              padding: EdgeInsets.only(left: leftPadding, right: 12),
+              child: Row(
+                mainAxisAlignment: compact
+                    ? MainAxisAlignment.center
+                    : MainAxisAlignment.start,
+                children: [
+                  SquareNavIcon(
+                    color: selected
+                        ? PeladinhasColors.onDark
+                        : PeladinhasColors.mutedIcon,
+                  ),
+                  if (!compact) ...[
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        page.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: PeladinhasTypography.label.copyWith(
+                          color: PeladinhasColors.onDark.withValues(
+                            alpha: selected ? 1 : 0.72,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+String _navKey(String label) {
+  return 'nav-${label.toLowerCase().replaceAll(' ', '-')}';
+}
+
+class _WorkspaceSwitch extends StatelessWidget {
+  const _WorkspaceSwitch({
+    required this.mode,
+    required this.compact,
+    required this.onModeSelected,
+  });
+
+  final _AppMode mode;
+  final bool compact;
+  final ValueChanged<_AppMode> onModeSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final target = mode == _AppMode.owner ? _AppMode.player : _AppMode.owner;
+    final label = target == _AppMode.owner ? 'Pitch admin' : 'Player';
+    return Material(
+      color: Colors.transparent,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(PeladinhasRadii.xs),
+        side: mode == _AppMode.owner
+            ? const BorderSide(color: Color(0xFF6D8D7E))
+            : BorderSide.none,
+      ),
+      child: InkWell(
+        onTap: () => onModeSelected(target),
+        borderRadius: BorderRadius.circular(PeladinhasRadii.xs),
+        child: SizedBox(
+          height: compact ? 44 : 40,
+          width: compact ? 52 : 184,
+          child: Row(
+            mainAxisAlignment: compact
+                ? MainAxisAlignment.center
+                : MainAxisAlignment.start,
+            children: [
+              SizedBox(width: compact ? 0 : 14),
+              const SquareNavIcon(color: PeladinhasColors.highlight),
+              if (!compact) ...[
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    label,
+                    style: PeladinhasTypography.label.copyWith(
+                      color: PeladinhasColors.onDark.withValues(alpha: 0.72),
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _WorkspaceChip extends StatelessWidget {
+  const _WorkspaceChip({required this.mode, required this.onModeSelected});
+
+  final _AppMode mode;
+  final ValueChanged<_AppMode> onModeSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<_AppMode>(
+      onSelected: onModeSelected,
+      itemBuilder: (context) => const [
+        PopupMenuItem(value: _AppMode.player, child: Text('Player mode')),
+        PopupMenuItem(value: _AppMode.owner, child: Text('Pitch admin')),
+      ],
+      child: PeladinhasInputShell(
+        active: true,
+        child: Text(
+          mode == _AppMode.owner ? 'OWNER' : 'PLAYER',
+          style: PeladinhasTypography.eyebrow.copyWith(
+            color: PeladinhasColors.brand,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TopBar extends StatelessWidget {
+  const _TopBar({
+    required this.strings,
+    required this.mode,
+    required this.ownerCapable,
+  });
+
+  final AppStrings strings;
+  final _AppMode mode;
+  final bool ownerCapable;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 700;
+        return DecoratedBox(
+          decoration: const BoxDecoration(
+            color: PeladinhasColors.surface,
+            border: Border(bottom: BorderSide(color: PeladinhasColors.border)),
+          ),
+          child: SizedBox(
+            height: 80,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: PeladinhasSpacing.page,
+              ),
+              child: Row(
+                children: [
+                  Flexible(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 420),
+                      child: PeladinhasInputShell(
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.search,
+                              size: 16,
+                              color: PeladinhasColors.brand,
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                'Search matches, groups or pitches',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: PeladinhasTypography.body,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  const Spacer(),
+                  if (!compact) ...[
+                    Text(
+                      'Lisbon',
+                      style: PeladinhasTypography.label.copyWith(
+                        color: PeladinhasColors.inkSecondary,
+                      ),
+                    ),
+                    const SizedBox(width: 18),
+                    Text(
+                      '●',
+                      style: PeladinhasTypography.eyebrow.copyWith(
+                        color: PeladinhasColors.brand,
+                      ),
+                    ),
+                    const SizedBox(width: 18),
+                  ],
+                  Text(
+                    mode == _AppMode.owner ? 'OWNER' : 'PLAYER',
+                    style: PeladinhasTypography.eyebrow.copyWith(
+                      color: PeladinhasColors.brand,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _SidebarProfile extends StatelessWidget {
+  const _SidebarProfile({required this.name, required this.mode});
+
+  final String name;
+  final _AppMode mode;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        CircleAvatar(
+          radius: 18,
+          backgroundColor: PeladinhasColors.highlight,
+          child: Text(
+            name.trim().isEmpty ? 'P' : name.trim()[0].toUpperCase(),
+            style: PeladinhasTypography.label.copyWith(
+              color: PeladinhasColors.brandDark,
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: PeladinhasTypography.label.copyWith(
+                  color: PeladinhasColors.onDark,
+                ),
+              ),
+              Text(
+                mode == _AppMode.owner ? 'Owner mode' : 'Player mode',
+                style: PeladinhasTypography.eyebrow.copyWith(
+                  color: PeladinhasColors.onDark.withValues(alpha: 0.58),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _HomePage extends StatelessWidget {
   const _HomePage({
     required this.strings,
@@ -342,6 +945,7 @@ class _MatchesPageState extends State<_MatchesPage> {
   late DateTime _startsAt;
   int _durationMinutes = 90;
   int _maxPlayers = 10;
+  int _selectedTab = 0;
   JoinMode _joinMode = JoinMode.openJoin;
   Match? _match;
   String? _message;
@@ -425,126 +1029,64 @@ class _MatchesPageState extends State<_MatchesPage> {
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.all(20),
-      children: [
-        _SectionCard(
-          title: 'Create direct match',
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (_message != null) ...[
-                _StatusText(_message!),
-                const SizedBox(height: 12),
-              ],
-              TextField(
-                controller: _groupNameController,
-                decoration: const InputDecoration(
-                  labelText: 'Group name',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(child: Text('Starts ${_formatDateTime(_startsAt)}')),
-                  OutlinedButton(
-                    onPressed: _busy ? null : _pickStartDateTime,
-                    child: const Text('Change'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<int>(
-                initialValue: _durationMinutes,
-                decoration: const InputDecoration(
-                  labelText: 'Duration',
-                  border: OutlineInputBorder(),
-                ),
-                items: const [60, 90, 120, 150]
-                    .map(
-                      (value) => DropdownMenuItem(
-                        value: value,
-                        child: Text('$value minutes'),
-                      ),
-                    )
-                    .toList(),
-                onChanged: _busy
-                    ? null
-                    : (value) => setState(
-                          () => _durationMinutes = value ?? _durationMinutes,
-                        ),
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<int>(
-                initialValue: _maxPlayers,
-                decoration: const InputDecoration(
-                  labelText: 'Max players',
-                  border: OutlineInputBorder(),
-                ),
-                items: const [8, 10, 12, 14, 16, 18, 20, 22]
-                    .map(
-                      (value) => DropdownMenuItem(
-                        value: value,
-                        child: Text('$value players'),
-                      ),
-                    )
-                    .toList(),
-                onChanged: _busy
-                    ? null
-                    : (value) =>
-                        setState(() => _maxPlayers = value ?? _maxPlayers),
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<JoinMode>(
-                initialValue: _joinMode,
-                decoration: const InputDecoration(
-                  labelText: 'Join mode',
-                  border: OutlineInputBorder(),
-                ),
-                items: JoinMode.values
-                    .map(
-                      (mode) => DropdownMenuItem(
-                        value: mode,
-                        child: Text(
-                          widget.strings.joinModeLabel(mode.apiValue),
-                        ),
-                      ),
-                    )
-                    .toList(),
-                onChanged: _busy
-                    ? null
-                    : (value) => setState(() => _joinMode = value ?? _joinMode),
-              ),
-              const SizedBox(height: 16),
-              Wrap(
-                spacing: 8,
-                children: [
-                  FilledButton(
-                    onPressed: _busy ? null : _createMatch,
-                    child: const Text('Create match'),
-                  ),
-                  OutlinedButton(
-                    onPressed: _busy || _match == null || !_match!.isDraft
-                        ? null
-                        : _openForPlayers,
-                    child: const Text('Open for players'),
-                  ),
-                ],
-              ),
-            ],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isMobile = PeladinhasBreakpoints.isMobile(constraints.maxWidth);
+        final horizontalPadding = isMobile ? 20.0 : PeladinhasSpacing.page;
+        return ListView(
+          padding: EdgeInsets.fromLTRB(
+            horizontalPadding,
+            isMobile ? 24 : 38,
+            horizontalPadding,
+            48,
           ),
-        ),
-        if (_match != null) ...[
-          const SizedBox(height: 16),
-          _SectionCard(
-            title: 'Current match',
-            child: Text(
-              'Status: ${_match!.status}\nJoin mode: ${widget.strings.joinModeLabel(_match!.joinMode.apiValue)}',
+          children: [
+            _MatchesHeader(
+              isMobile: isMobile,
+              onCreate: () => setState(() => _selectedTab = 1),
             ),
-          ),
-        ],
-      ],
+            const SizedBox(height: PeladinhasSpacing.xl),
+            PeladinhasTabs(
+              tabs: const [
+                'Find a match',
+                'Create a match',
+                'My upcoming matches',
+              ],
+              selectedIndex: _selectedTab,
+              onChanged: (index) => setState(() => _selectedTab = index),
+            ),
+            const SizedBox(height: PeladinhasSpacing.xl),
+            if (_selectedTab == 0)
+              _FindMatchTab(isMobile: isMobile)
+            else if (_selectedTab == 1)
+              _CreateMatchTab(
+                busy: _busy,
+                message: _message,
+                groupNameController: _groupNameController,
+                startsAt: _startsAt,
+                durationMinutes: _durationMinutes,
+                maxPlayers: _maxPlayers,
+                joinMode: _joinMode,
+                currentMatch: _match,
+                strings: widget.strings,
+                onPickStartDateTime: _pickStartDateTime,
+                onDurationChanged: (value) => setState(
+                  () => _durationMinutes = value ?? _durationMinutes,
+                ),
+                onMaxPlayersChanged: (value) =>
+                    setState(() => _maxPlayers = value ?? _maxPlayers),
+                onJoinModeChanged: (value) =>
+                    setState(() => _joinMode = value ?? _joinMode),
+                onCreateMatch: _busy ? null : _createMatch,
+                onOpenForPlayers: _busy || _match == null || !_match!.isDraft
+                    ? null
+                    : _openForPlayers,
+              )
+            else
+              _UpcomingMatchesTab(match: _match, strings: widget.strings),
+          ],
+        );
+      },
     );
   }
 
@@ -568,6 +1110,432 @@ class _MatchesPageState extends State<_MatchesPage> {
         date.day,
         time.hour,
         time.minute,
+      ),
+    );
+  }
+}
+
+class _MatchesHeader extends StatelessWidget {
+  const _MatchesHeader({required this.isMobile, required this.onCreate});
+
+  final bool isMobile;
+  final VoidCallback onCreate;
+
+  @override
+  Widget build(BuildContext context) {
+    final heading = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Matches', style: PeladinhasTypography.display),
+        const SizedBox(height: 7),
+        Text(
+          'Find the right game or organise one for your community.',
+          style: PeladinhasTypography.body,
+        ),
+      ],
+    );
+    if (isMobile) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          heading,
+          const SizedBox(height: PeladinhasSpacing.lg),
+          PeladinhasButton(label: 'Create a match', onPressed: onCreate),
+        ],
+      );
+    }
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Expanded(child: heading),
+        PeladinhasButton(label: 'Create a match', onPressed: onCreate),
+      ],
+    );
+  }
+}
+
+class _FindMatchTab extends StatelessWidget {
+  const _FindMatchTab({required this.isMobile});
+
+  final bool isMobile;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const _MatchFilters(count: 0),
+        const SizedBox(height: PeladinhasSpacing.xl),
+        if (isMobile)
+          const Column(
+            children: [
+              _MatchesStateCard(
+                title: 'No open matches found',
+                message:
+                    'Open matches will appear here when they are available.',
+              ),
+              SizedBox(height: PeladinhasSpacing.xl),
+              _AreaPanel(compact: true),
+            ],
+          )
+        else
+          const Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                flex: 7,
+                child: _MatchesStateCard(
+                  title: 'No open matches found',
+                  message:
+                      'Open matches will appear here when they are available.',
+                ),
+              ),
+              SizedBox(width: 20),
+              SizedBox(width: 324, child: _AreaPanel(compact: false)),
+            ],
+          ),
+      ],
+    );
+  }
+}
+
+class _CreateMatchTab extends StatelessWidget {
+  const _CreateMatchTab({
+    required this.busy,
+    required this.message,
+    required this.groupNameController,
+    required this.startsAt,
+    required this.durationMinutes,
+    required this.maxPlayers,
+    required this.joinMode,
+    required this.currentMatch,
+    required this.strings,
+    required this.onPickStartDateTime,
+    required this.onDurationChanged,
+    required this.onMaxPlayersChanged,
+    required this.onJoinModeChanged,
+    required this.onCreateMatch,
+    required this.onOpenForPlayers,
+  });
+
+  final bool busy;
+  final String? message;
+  final TextEditingController groupNameController;
+  final DateTime startsAt;
+  final int durationMinutes;
+  final int maxPlayers;
+  final JoinMode joinMode;
+  final Match? currentMatch;
+  final AppStrings strings;
+  final VoidCallback onPickStartDateTime;
+  final ValueChanged<int?> onDurationChanged;
+  final ValueChanged<int?> onMaxPlayersChanged;
+  final ValueChanged<JoinMode?> onJoinModeChanged;
+  final VoidCallback? onCreateMatch;
+  final VoidCallback? onOpenForPlayers;
+
+  @override
+  Widget build(BuildContext context) {
+    return PeladinhasCard(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Create a match', style: PeladinhasTypography.title),
+          const SizedBox(height: PeladinhasSpacing.sm),
+          Text(
+            'Organise a real match through the authenticated backend.',
+            style: PeladinhasTypography.body,
+          ),
+          if (message != null) ...[
+            const SizedBox(height: PeladinhasSpacing.lg),
+            _StatusText(message!),
+          ],
+          const SizedBox(height: PeladinhasSpacing.xl),
+          TextField(
+            controller: groupNameController,
+            decoration: const InputDecoration(
+              labelText: 'Group name',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: PeladinhasSpacing.lg),
+          Wrap(
+            spacing: PeladinhasSpacing.lg,
+            runSpacing: PeladinhasSpacing.lg,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              SizedBox(
+                width: 280,
+                child: PeladinhasInputShell(
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text('Starts ${_formatDateTime(startsAt)}'),
+                      ),
+                      TextButton(
+                        onPressed: busy ? null : onPickStartDateTime,
+                        child: const Text('Change'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              SizedBox(
+                width: 220,
+                child: DropdownButtonFormField<int>(
+                  initialValue: durationMinutes,
+                  decoration: const InputDecoration(labelText: 'Duration'),
+                  items: const [60, 90, 120, 150]
+                      .map(
+                        (value) => DropdownMenuItem(
+                          value: value,
+                          child: Text('$value minutes'),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: busy ? null : onDurationChanged,
+                ),
+              ),
+              SizedBox(
+                width: 220,
+                child: DropdownButtonFormField<int>(
+                  initialValue: maxPlayers,
+                  decoration: const InputDecoration(labelText: 'Max players'),
+                  items: const [8, 10, 12, 14, 16, 18, 20, 22]
+                      .map(
+                        (value) => DropdownMenuItem(
+                          value: value,
+                          child: Text('$value players'),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: busy ? null : onMaxPlayersChanged,
+                ),
+              ),
+              SizedBox(
+                width: 320,
+                child: DropdownButtonFormField<JoinMode>(
+                  initialValue: joinMode,
+                  decoration: const InputDecoration(labelText: 'Join mode'),
+                  items: JoinMode.values
+                      .map(
+                        (mode) => DropdownMenuItem(
+                          value: mode,
+                          child: Text(strings.joinModeLabel(mode.apiValue)),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: busy ? null : onJoinModeChanged,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: PeladinhasSpacing.xl),
+          Wrap(
+            spacing: PeladinhasSpacing.sm,
+            runSpacing: PeladinhasSpacing.sm,
+            children: [
+              PeladinhasButton(label: 'Create match', onPressed: onCreateMatch),
+              PeladinhasButton(
+                label: 'Open for players',
+                tone: PeladinhasButtonTone.secondary,
+                onPressed: onOpenForPlayers,
+              ),
+            ],
+          ),
+          if (currentMatch != null) ...[
+            const SizedBox(height: PeladinhasSpacing.xl),
+            _MatchesStateCard(
+              title: 'Current match',
+              message:
+                  'Status: ${currentMatch!.status}\nJoin mode: ${strings.joinModeLabel(currentMatch!.joinMode.apiValue)}',
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _UpcomingMatchesTab extends StatelessWidget {
+  const _UpcomingMatchesTab({required this.match, required this.strings});
+
+  final Match? match;
+  final AppStrings strings;
+
+  @override
+  Widget build(BuildContext context) {
+    if (match == null) {
+      return const _MatchesStateCard(
+        title: 'You have no upcoming matches.',
+        message: 'Created or joined matches will appear here.',
+      );
+    }
+    return _MatchesStateCard(
+      title: match!.groupName,
+      message:
+          'Status: ${match!.status}\nStarts: ${_formatDateTime(match!.startsAt)}\nJoin mode: ${strings.joinModeLabel(match!.joinMode.apiValue)}',
+    );
+  }
+}
+
+class _MatchFilters extends StatelessWidget {
+  const _MatchFilters({required this.count});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 10,
+      runSpacing: 10,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        _FilterChip(label: 'Lisbon', active: true),
+        _FilterChip(label: 'This week'),
+        _FilterChip(label: 'Any format'),
+        _FilterChip(label: 'My level'),
+        const SizedBox(width: 120),
+        PeladinhasStatusLabel(label: '$count open matches'),
+      ],
+    );
+  }
+}
+
+class _FilterChip extends StatelessWidget {
+  const _FilterChip({required this.label, this.active = false});
+
+  final String label;
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) {
+    return PeladinhasInputShell(
+      active: active,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label,
+            style: PeladinhasTypography.label.copyWith(
+              color: active
+                  ? PeladinhasColors.brand
+                  : PeladinhasColors.inkSecondary,
+            ),
+          ),
+          const SizedBox(width: PeladinhasSpacing.md),
+          Text(
+            '⌄',
+            style: PeladinhasTypography.eyebrow.copyWith(
+              color: active
+                  ? PeladinhasColors.brand
+                  : PeladinhasColors.inkSecondary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AreaPanel extends StatelessWidget {
+  const _AreaPanel({required this.compact});
+
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: PeladinhasColors.brandDark,
+        borderRadius: BorderRadius.circular(PeladinhasRadii.sm),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(28),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'PLAY NEAR YOU',
+              style: PeladinhasTypography.eyebrow.copyWith(
+                color: PeladinhasColors.highlight,
+              ),
+            ),
+            const SizedBox(height: PeladinhasSpacing.lg),
+            Text(
+              'Lisbon',
+              style: PeladinhasTypography.title.copyWith(
+                color: PeladinhasColors.onDark,
+              ),
+            ),
+            const SizedBox(height: PeladinhasSpacing.md),
+            Text(
+              'Browse games by neighbourhood and discover the places where your football community already plays.',
+              style: PeladinhasTypography.body.copyWith(
+                color: PeladinhasColors.onDark.withValues(alpha: 0.74),
+              ),
+            ),
+            const SizedBox(height: PeladinhasSpacing.lg),
+            SizedBox(
+              height: compact ? 150 : 190,
+              width: double.infinity,
+              child: const CustomPaint(painter: _AreaMapPainter()),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AreaMapPainter extends CustomPainter {
+  const _AreaMapPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final background = Paint()..color = PeladinhasColors.brand;
+    final marker = Paint()..color = PeladinhasColors.highlight;
+    final rect = RRect.fromRectAndRadius(
+      Offset.zero & size,
+      const Radius.circular(PeladinhasRadii.xs),
+    );
+    canvas.drawRRect(rect, background);
+    for (final offset in const [
+      Offset(0.22, 0.24),
+      Offset(0.63, 0.20),
+      Offset(0.38, 0.58),
+      Offset(0.80, 0.66),
+    ]) {
+      canvas.drawCircle(
+        Offset(size.width * offset.dx, size.height * offset.dy),
+        4,
+        marker,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+class _MatchesStateCard extends StatelessWidget {
+  const _MatchesStateCard({required this.title, required this.message});
+
+  final String title;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return PeladinhasCard(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: PeladinhasTypography.sectionTitle),
+          const SizedBox(height: PeladinhasSpacing.sm),
+          Text(message, style: PeladinhasTypography.body),
+        ],
       ),
     );
   }
@@ -626,7 +1594,8 @@ class _PlayerPitchesPage extends StatelessWidget {
                 'Pitch: ${pitch!.name}'
               else
                 'No pitch selected yet.',
-              if (availability != null) 'Available: ${availability!.isAvailable}',
+              if (availability != null)
+                'Available: ${availability!.isAvailable}',
               if (booking != null) 'Booking status: ${booking!.status}',
             ].join('\n'),
           ),
@@ -799,8 +1768,14 @@ class _OwnerDashboardPageState extends State<_OwnerDashboardPage> {
                 spacing: 12,
                 runSpacing: 12,
                 children: [
-                  _MetricTile(label: widget.strings.myPitches, value: '$pitches'),
-                  _MetricTile(label: widget.strings.bookings, value: '$bookings'),
+                  _MetricTile(
+                    label: widget.strings.myPitches,
+                    value: '$pitches',
+                  ),
+                  _MetricTile(
+                    label: widget.strings.bookings,
+                    value: '$bookings',
+                  ),
                 ],
               ),
             );
@@ -1035,10 +2010,7 @@ class _OwnerPitchesPageState extends State<_OwnerPitchesPage> {
 }
 
 class _OwnerBookingsPage extends StatefulWidget {
-  const _OwnerBookingsPage({
-    required this.strings,
-    required this.apiClient,
-  });
+  const _OwnerBookingsPage({required this.strings, required this.apiClient});
 
   final AppStrings strings;
   final PeladinhasApiClient apiClient;

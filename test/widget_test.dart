@@ -2,10 +2,12 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:peladinhas/auth/peladinhas_auth_service.dart';
+import 'package:peladinhas/design/peladinhas_tokens.dart';
 import 'package:peladinhas/main.dart';
 import 'package:peladinhas/models/auth_session.dart';
 import 'package:peladinhas/network/peladinhas_api_client.dart';
@@ -96,10 +98,7 @@ void main() {
   });
 
   testWidgets('shows main navigation when a profile exists', (tester) async {
-    tester.view.physicalSize = const Size(1200, 1400);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
+    await _useDesktopViewport(tester);
 
     await tester.pumpWidget(
       _appWith(
@@ -113,11 +112,13 @@ void main() {
     expect(find.textContaining('Welcome back, Test User'), findsOneWidget);
     expect(find.text('You have no upcoming matches.'), findsOneWidget);
     expect(find.text('Add pitch'), findsNothing);
-    expect(find.text('Owner mode'), findsNothing);
+    expect(find.text('Pitch admin'), findsNothing);
 
     await tester.tap(find.text('Matches'));
     await tester.pumpAndSettle();
-    expect(find.text('Create direct match'), findsOneWidget);
+    await tester.tap(find.text('Create a match').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Create a match'), findsWidgets);
     expect(find.text('Open join'), findsOneWidget);
     expect(find.text('open_join'), findsNothing);
 
@@ -142,9 +143,111 @@ void main() {
     expect(find.text('Become a pitch owner'), findsOneWidget);
   });
 
+  testWidgets('theme uses bundled Manrope with deliberate fallbacks', (
+    tester,
+  ) async {
+    ThemeData? theme;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildPeladinhasTheme(),
+        home: Builder(
+          builder: (context) {
+            theme = Theme.of(context);
+            return const SizedBox.shrink();
+          },
+        ),
+      ),
+    );
+
+    expect(theme?.textTheme.bodyMedium?.fontFamily, 'Manrope');
+    expect(
+      theme?.textTheme.bodyMedium?.fontFamilyFallback,
+      PeladinhasTypography.fontFamilyFallback,
+    );
+    expect(PeladinhasTypography.body.fontWeight, FontWeight.w400);
+    expect(PeladinhasTypography.eyebrow.fontWeight, FontWeight.w500);
+    expect(PeladinhasTypography.label.fontWeight, FontWeight.w600);
+    expect(PeladinhasTypography.display.fontWeight, FontWeight.w700);
+
+    final manifest =
+        jsonDecode(await rootBundle.loadString('FontManifest.json')) as List;
+    final manrope = manifest.cast<Map<String, dynamic>>().singleWhere(
+      (font) => font['family'] == 'Manrope',
+    );
+    final weights = (manrope['fonts'] as List)
+        .cast<Map<String, dynamic>>()
+        .map((font) => font['weight'])
+        .toSet();
+    final assets = (manrope['fonts'] as List)
+        .cast<Map<String, dynamic>>()
+        .map((font) => Uri.decodeFull(font['asset'] as String))
+        .toSet();
+
+    expect(weights, <int>{400, 500, 600, 700});
+    expect(assets, {
+      'assets/fonts/manrope/Manrope-Regular.ttf',
+      'assets/fonts/manrope/Manrope-Medium.ttf',
+      'assets/fonts/manrope/Manrope-SemiBold.ttf',
+      'assets/fonts/manrope/Manrope-Bold.ttf',
+    });
+  });
+
+  testWidgets('authenticated shell renders at representative widths', (
+    tester,
+  ) async {
+    for (final width in const [
+      1440.0,
+      1200.0,
+      1199.0,
+      1024.0,
+      768.0,
+      767.0,
+      390.0,
+      360.0,
+    ]) {
+      await _useViewport(tester, Size(width, 900));
+      await tester.pumpWidget(
+        _appWith(
+          auth: _FakeAuthService(current: _session),
+          handler: _profileResponse(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Welcome back, Test User'), findsOneWidget);
+      final navigationBarFinder = find.byKey(const Key('mobile-navigation'));
+      final desktopSidebarFinder = find.byKey(const Key('desktop-sidebar'));
+      final tabletSidebarFinder = find.byKey(const Key('tablet-sidebar'));
+
+      if (width >= 1200) {
+        expect(desktopSidebarFinder, findsOneWidget);
+        expect(tabletSidebarFinder, findsNothing);
+        expect(navigationBarFinder, findsNothing);
+      } else if (width >= 768) {
+        expect(desktopSidebarFinder, findsNothing);
+        expect(tabletSidebarFinder, findsOneWidget);
+        expect(navigationBarFinder, findsNothing);
+      } else {
+        expect(desktopSidebarFinder, findsNothing);
+        expect(tabletSidebarFinder, findsNothing);
+        expect(navigationBarFinder, findsOneWidget);
+        expect(find.byType(NavigationBar), findsOneWidget);
+      }
+
+      await tester.tap(find.byKey(const Key('nav-matches')));
+      await tester.pumpAndSettle();
+      expect(find.text('Find a match'), findsWidgets);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+    }
+  });
+
   testWidgets('existing player activates owner mode from profile', (
     tester,
   ) async {
+    await _useDesktopViewport(tester);
+
     await tester.pumpWidget(
       _appWith(
         auth: _FakeAuthService(current: _session),
@@ -168,12 +271,14 @@ void main() {
     await tester.tap(find.text('Activate owner mode'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Owner mode'), findsOneWidget);
+    expect(find.text('Pitch admin'), findsOneWidget);
     expect(find.text('Invitation code'), findsNothing);
     expect(find.text('OWNER-CODE'), findsNothing);
   });
 
   testWidgets('invalid owner activation shows readable error', (tester) async {
+    await _useDesktopViewport(tester);
+
     await tester.pumpWidget(
       _appWith(
         auth: _FakeAuthService(current: _session),
@@ -204,12 +309,17 @@ void main() {
     await tester.tap(find.text('Activate owner mode'));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('owner_invitation_code_invalid'), findsOneWidget);
+    expect(
+      find.textContaining('owner_invitation_code_invalid'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('owner receives switch and keeps player navigation', (
     tester,
   ) async {
+    await _useDesktopViewport(tester);
+
     await tester.pumpWidget(
       _appWith(
         auth: _FakeAuthService(current: _session),
@@ -219,17 +329,17 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Player mode'), findsOneWidget);
-    expect(find.text('Owner mode'), findsOneWidget);
+    expect(find.text('Pitch admin'), findsOneWidget);
     expect(find.text('Matches'), findsWidgets);
 
-    await tester.tap(find.text('Owner mode'));
+    await tester.tap(find.text('Pitch admin'));
     await tester.pumpAndSettle();
 
     expect(find.text('Owner dashboard'), findsWidgets);
     expect(find.text('My pitches'), findsWidgets);
     expect(find.text('Bookings'), findsWidgets);
 
-    await tester.tap(find.text('Player mode'));
+    await tester.tap(find.text('Player'));
     await tester.pumpAndSettle();
 
     expect(find.text('Matches'), findsWidgets);
@@ -239,6 +349,8 @@ void main() {
   testWidgets('owner pitch and booking data render from owner endpoints', (
     tester,
   ) async {
+    await _useDesktopViewport(tester);
+
     await tester.pumpWidget(
       _appWith(
         auth: _FakeAuthService(current: _session),
@@ -247,15 +359,15 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Owner mode'));
+    await tester.tap(find.text('Pitch admin'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('My pitches').last);
+    await tester.tap(find.text('My pitches').first);
     await tester.pumpAndSettle();
 
     expect(find.text('Central Pitch'), findsOneWidget);
     expect(find.textContaining('Lisbon'), findsWidgets);
 
-    await tester.tap(find.text('Bookings').last);
+    await tester.tap(find.text('Bookings').first);
     await tester.pumpAndSettle();
 
     expect(find.text('Booking provisional'), findsOneWidget);
@@ -265,6 +377,8 @@ void main() {
   testWidgets('owner empty states render from empty owner endpoints', (
     tester,
   ) async {
+    await _useDesktopViewport(tester);
+
     await tester.pumpWidget(
       _appWith(
         auth: _FakeAuthService(current: _session),
@@ -279,13 +393,13 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Owner mode'));
+    await tester.tap(find.text('Pitch admin'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('My pitches').last);
+    await tester.tap(find.text('My pitches').first);
     await tester.pumpAndSettle();
     expect(find.textContaining('No pitches yet.'), findsOneWidget);
 
-    await tester.tap(find.text('Bookings').last);
+    await tester.tap(find.text('Bookings').first);
     await tester.pumpAndSettle();
     expect(find.textContaining('No bookings yet.'), findsOneWidget);
   });
@@ -293,6 +407,8 @@ void main() {
   testWidgets('owner dashboard failure is not shown as zero counts', (
     tester,
   ) async {
+    await _useDesktopViewport(tester);
+
     var pitchRequests = 0;
     await tester.pumpWidget(
       _appWith(
@@ -314,7 +430,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Owner mode'));
+    await tester.tap(find.text('Pitch admin'));
     await tester.pumpAndSettle();
 
     expect(find.textContaining("couldn't load"), findsOneWidget);
@@ -334,6 +450,8 @@ void main() {
   testWidgets('owner pitches failure is not shown as an empty list', (
     tester,
   ) async {
+    await _useDesktopViewport(tester);
+
     var pitchRequests = 0;
     await tester.pumpWidget(
       _appWith(
@@ -355,9 +473,9 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Owner mode'));
+    await tester.tap(find.text('Pitch admin'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('My pitches').last);
+    await tester.tap(find.text('My pitches').first);
     await tester.pumpAndSettle();
 
     expect(find.textContaining("couldn't load"), findsOneWidget);
@@ -377,6 +495,8 @@ void main() {
   testWidgets('owner bookings failure is not shown as an empty list', (
     tester,
   ) async {
+    await _useDesktopViewport(tester);
+
     var bookingRequests = 0;
     await tester.pumpWidget(
       _appWith(
@@ -398,9 +518,9 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Owner mode'));
+    await tester.tap(find.text('Pitch admin'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Bookings').last);
+    await tester.tap(find.text('Bookings').first);
     await tester.pumpAndSettle();
 
     expect(find.textContaining("couldn't load"), findsOneWidget);
@@ -420,7 +540,11 @@ void main() {
   testWidgets('player cannot access owner screens from stored mode', (
     tester,
   ) async {
-    SharedPreferences.setMockInitialValues({'peladinhas.selectedMode': 'owner'});
+    await _useDesktopViewport(tester);
+
+    SharedPreferences.setMockInitialValues({
+      'peladinhas.selectedMode': 'owner',
+    });
     await tester.pumpWidget(
       _appWith(
         auth: _FakeAuthService(current: _session),
@@ -429,12 +553,14 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Owner mode'), findsNothing);
+    expect(find.text('Pitch admin'), findsNothing);
     expect(find.text('Owner dashboard'), findsNothing);
     expect(find.text('Home'), findsWidgets);
   });
 
   testWidgets('logout returns the app to authentication', (tester) async {
+    await _useDesktopViewport(tester);
+
     final auth = _FakeAuthService(current: _session);
     await tester.pumpWidget(_appWith(auth: auth, handler: _profileResponse()));
     await tester.pumpAndSettle();
@@ -447,6 +573,17 @@ void main() {
     expect(auth.currentSession, isNull);
     expect(find.text('Log In'), findsOneWidget);
   });
+}
+
+Future<void> _useDesktopViewport(WidgetTester tester) async {
+  await _useViewport(tester, const Size(1440, 1024));
+}
+
+Future<void> _useViewport(WidgetTester tester, Size size) async {
+  tester.view.physicalSize = size;
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
 }
 
 final _session = AuthSession(
