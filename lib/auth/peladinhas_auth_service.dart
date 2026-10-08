@@ -24,9 +24,39 @@ abstract class PeladinhasAuthService implements AccessTokenProvider {
   Future<void> signOut();
 }
 
+class AuthUserFacingException implements Exception {
+  const AuthUserFacingException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
+String safeAuthenticationErrorMessage(Object error) {
+  if (error is AuthUserFacingException) {
+    return error.message;
+  }
+  if (error is supabase.AuthRetryableFetchException) {
+    return "We couldn’t connect. Please check your connection and try again.";
+  }
+  if (error is supabase.AuthException) {
+    return _safeSupabaseAuthMessage(error);
+  }
+  final text = error.toString().toLowerCase();
+  if (text.contains('socketexception') ||
+      text.contains('clientexception') ||
+      text.contains('failed host lookup') ||
+      text.contains('xmlhttprequest') ||
+      text.contains('network')) {
+    return "We couldn’t connect. Please check your connection and try again.";
+  }
+  return 'Something went wrong. Please try again.';
+}
+
 class SupabasePeladinhasAuthService implements PeladinhasAuthService {
   SupabasePeladinhasAuthService({supabase.SupabaseClient? client})
-      : _client = client ?? supabase.Supabase.instance.client;
+    : _client = client ?? supabase.Supabase.instance.client;
 
   final supabase.SupabaseClient _client;
 
@@ -105,4 +135,37 @@ class SupabasePeladinhasAuthService implements PeladinhasAuthService {
       email: user.email,
     );
   }
+}
+
+String _safeSupabaseAuthMessage(supabase.AuthException error) {
+  final code = error.code?.toLowerCase();
+  final message = error.message.toLowerCase();
+  final statusCode = error.statusCode;
+
+  if (code == 'invalid_credentials' ||
+      code == 'invalid_grant' ||
+      code == 'user_not_found' ||
+      message.contains('invalid login credentials')) {
+    return 'The email or password is incorrect.';
+  }
+  if (code == 'email_not_confirmed' ||
+      message.contains('email not confirmed') ||
+      message.contains('confirm your email')) {
+    return 'Please confirm your email before logging in.';
+  }
+  if (code == 'user_already_exists' ||
+      code == 'email_exists' ||
+      message.contains('already registered') ||
+      message.contains('already exists')) {
+    return 'An account already exists for this email.';
+  }
+  if (code == 'over_request_rate_limit' ||
+      code == 'over_email_send_rate_limit' ||
+      code == 'over_sms_send_rate_limit' ||
+      statusCode == '429' ||
+      message.contains('rate limit') ||
+      message.contains('too many')) {
+    return 'Too many attempts. Please wait and try again.';
+  }
+  return 'Something went wrong. Please try again.';
 }
