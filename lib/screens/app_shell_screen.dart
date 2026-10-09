@@ -8,7 +8,9 @@ import '../design/peladinhas_tokens.dart';
 import '../l10n/app_strings.dart';
 import '../models/booking.dart';
 import '../models/match.dart';
+import '../models/match_discovery.dart';
 import '../models/pitch.dart';
+import '../models/participant.dart';
 import '../network/peladinhas_api_client.dart';
 import 'auth_integration_screen.dart';
 
@@ -941,12 +943,33 @@ class _MatchesPage extends StatefulWidget {
 }
 
 class _MatchesPageState extends State<_MatchesPage> {
+  static const _discoveryPageSize = 10;
+
+  final _areaController = TextEditingController();
   final _groupNameController = TextEditingController(text: 'Peladinhas Match');
   late DateTime _startsAt;
   int _durationMinutes = 90;
   int _maxPlayers = 10;
   int _selectedTab = 0;
   JoinMode _joinMode = JoinMode.openJoin;
+  JoinMode? _discoveryJoinMode;
+  DateTime? _filterStartsFrom;
+  DateTime? _filterStartsTo;
+  TimeOfDay? _filterTimeFrom;
+  TimeOfDay? _filterTimeTo;
+  bool _availableOnly = false;
+  bool _discoveryLoading = true;
+  bool _discoveryLoadingMore = false;
+  String? _discoveryError;
+  String? _discoveryPageError;
+  String? _discoveryValidationError;
+  String? _discoveryActionMessage;
+  int _discoveryPage = 0;
+  int _discoveryTotalPages = 0;
+  int _discoveryTotalElements = 0;
+  int _discoveryGeneration = 0;
+  final List<MatchDiscoveryItem> _discoveredMatches = [];
+  final Set<String> _submittedDiscoveryMatches = {};
   Match? _match;
   String? _message;
   bool _busy = false;
@@ -957,6 +980,11 @@ class _MatchesPageState extends State<_MatchesPage> {
     final now = DateTime.now();
     _startsAt = DateTime(now.year, now.month, now.day, now.hour + 2);
     _match = widget.initialMatch;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _loadDiscovery(reset: true);
+      }
+    });
   }
 
   @override
@@ -969,6 +997,7 @@ class _MatchesPageState extends State<_MatchesPage> {
 
   @override
   void dispose() {
+    _areaController.dispose();
     _groupNameController.dispose();
     super.dispose();
   }
@@ -1057,7 +1086,40 @@ class _MatchesPageState extends State<_MatchesPage> {
             ),
             const SizedBox(height: PeladinhasSpacing.xl),
             if (_selectedTab == 0)
-              _FindMatchTab(isMobile: isMobile)
+              _FindMatchTab(
+                isMobile: isMobile,
+                areaController: _areaController,
+                startsFrom: _filterStartsFrom,
+                startsTo: _filterStartsTo,
+                timeFrom: _filterTimeFrom,
+                timeTo: _filterTimeTo,
+                joinMode: _discoveryJoinMode,
+                availableOnly: _availableOnly,
+                loading: _discoveryLoading,
+                loadingMore: _discoveryLoadingMore,
+                error: _discoveryError,
+                pageError: _discoveryPageError,
+                validationError: _discoveryValidationError,
+                actionMessage: _discoveryActionMessage,
+                matches: _discoveredMatches,
+                totalElements: _discoveryTotalElements,
+                hasMore: _discoveryPage + 1 < _discoveryTotalPages,
+                submittedMatchIds: _submittedDiscoveryMatches,
+                strings: widget.strings,
+                onStartsFrom: () => _pickFilterDate(isStart: true),
+                onStartsTo: () => _pickFilterDate(isStart: false),
+                onTimeFrom: () => _pickFilterTime(isStart: true),
+                onTimeTo: () => _pickFilterTime(isStart: false),
+                onJoinModeChanged: (value) =>
+                    setState(() => _discoveryJoinMode = value),
+                onAvailableOnlyChanged: (value) =>
+                    setState(() => _availableOnly = value),
+                onApplyFilters: _applyDiscoveryFilters,
+                onResetFilters: _resetDiscoveryFilters,
+                onRetry: () => _loadDiscovery(reset: true),
+                onLoadMore: _discoveryLoadingMore ? null : _loadMoreDiscovery,
+                onJoin: _joinDiscoveredMatch,
+              )
             else if (_selectedTab == 1)
               _CreateMatchTab(
                 busy: _busy,
@@ -1113,6 +1175,232 @@ class _MatchesPageState extends State<_MatchesPage> {
       ),
     );
   }
+
+  MatchDiscoveryFilters _discoveryFilters() {
+    return MatchDiscoveryFilters(
+      area: _areaController.text,
+      startsFrom: _filterStartsFrom,
+      startsTo: _filterStartsTo,
+      timeFrom: _formatQueryTime(_filterTimeFrom),
+      timeTo: _formatQueryTime(_filterTimeTo),
+      joinMode: _discoveryJoinMode,
+      availableOnly: _availableOnly,
+    );
+  }
+
+  String? _validateDiscoveryFilters() {
+    if (_filterStartsFrom != null &&
+        _filterStartsTo != null &&
+        _filterStartsFrom!.isAfter(_filterStartsTo!)) {
+      return 'Choose an end date after the start date.';
+    }
+    if (_filterTimeFrom != null &&
+        _filterTimeTo != null &&
+        _minutesOfDay(_filterTimeFrom!) > _minutesOfDay(_filterTimeTo!)) {
+      return 'Choose an end time after the start time.';
+    }
+    return null;
+  }
+
+  Future<void> _loadDiscovery({required bool reset}) async {
+    final validation = _validateDiscoveryFilters();
+    if (validation != null) {
+      setState(() => _discoveryValidationError = validation);
+      return;
+    }
+    if (!reset && (_discoveryLoading || _discoveryLoadingMore)) {
+      return;
+    }
+
+    final generation = reset ? _discoveryGeneration + 1 : _discoveryGeneration;
+    final nextPage = reset ? 0 : _discoveryPage + 1;
+    setState(() {
+      if (reset) {
+        _discoveryGeneration = generation;
+      }
+      _discoveryValidationError = null;
+      if (reset) {
+        _discoveryError = null;
+      }
+      _discoveryPageError = null;
+      if (reset) {
+        _discoveryLoading = true;
+        _discoveryLoadingMore = false;
+        _discoveryActionMessage = null;
+      } else {
+        _discoveryLoadingMore = true;
+      }
+    });
+
+    try {
+      final page = await widget.apiClient.discoverMatches(
+        filters: _discoveryFilters(),
+        page: nextPage,
+        size: _discoveryPageSize,
+      );
+      if (!mounted || generation != _discoveryGeneration) {
+        return;
+      }
+      setState(() {
+        if (reset) {
+          _discoveredMatches
+            ..clear()
+            ..addAll(page.matches);
+        } else {
+          _discoveredMatches.addAll(page.matches);
+        }
+        _discoveryPage = page.page;
+        _discoveryTotalPages = page.totalPages;
+        _discoveryTotalElements = page.totalElements;
+        _discoveryPageError = null;
+      });
+    } catch (error) {
+      if (!mounted || generation != _discoveryGeneration) {
+        return;
+      }
+      setState(() {
+        final message = "We couldn't load matches. Please try again.";
+        if (reset) {
+          _discoveryError = message;
+        } else {
+          _discoveryPageError = message;
+        }
+      });
+    } finally {
+      if (mounted && generation == _discoveryGeneration) {
+        setState(() {
+          if (reset) {
+            _discoveryLoading = false;
+          } else {
+            _discoveryLoadingMore = false;
+          }
+        });
+      }
+    }
+  }
+
+  Future<void> _applyDiscoveryFilters() async {
+    await _loadDiscovery(reset: true);
+  }
+
+  Future<void> _loadMoreDiscovery() async {
+    await _loadDiscovery(reset: false);
+  }
+
+  Future<void> _resetDiscoveryFilters() async {
+    _areaController.clear();
+    setState(() {
+      _filterStartsFrom = null;
+      _filterStartsTo = null;
+      _filterTimeFrom = null;
+      _filterTimeTo = null;
+      _discoveryJoinMode = null;
+      _availableOnly = false;
+      _discoveryValidationError = null;
+      _discoveryPageError = null;
+      _discoveryActionMessage = null;
+    });
+    await _loadDiscovery(reset: true);
+  }
+
+  Future<void> _joinDiscoveredMatch(MatchDiscoveryItem match) async {
+    if (_submittedDiscoveryMatches.contains(match.matchId)) {
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirm participation'),
+        content: Text(
+          match.joinMode == JoinMode.openJoin
+              ? 'Join ${match.displayName}?'
+              : 'Request to join ${match.displayName}?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(
+              match.joinMode == JoinMode.openJoin ? 'Join' : 'Request',
+            ),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) {
+      return;
+    }
+
+    setState(() {
+      _discoveryActionMessage = null;
+      _submittedDiscoveryMatches.add(match.matchId);
+    });
+    try {
+      final Participant participant = match.joinMode == JoinMode.openJoin
+          ? await widget.apiClient.joinOpenMatch(match.matchId)
+          : await widget.apiClient.requestToJoin(match.matchId);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        final status = _participantStatusLabel(participant.status);
+        _discoveryActionMessage = match.joinMode == JoinMode.openJoin
+            ? 'Joined. Participant status: $status.'
+            : 'Request sent. Participant status: $status.';
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _submittedDiscoveryMatches.remove(match.matchId);
+        _discoveryActionMessage =
+            "We couldn't update your participation. Please try again.";
+      });
+    }
+  }
+
+  Future<void> _pickFilterDate({required bool isStart}) async {
+    final current = isStart ? _filterStartsFrom : _filterStartsTo;
+    final date = await showDatePicker(
+      context: context,
+      initialDate: current ?? DateTime.now(),
+      firstDate: DateTime.now().subtract(const Duration(days: 1)),
+      lastDate: DateTime.now().add(const Duration(days: 180)),
+    );
+    if (date == null) {
+      return;
+    }
+    setState(() {
+      final normalized = DateTime(date.year, date.month, date.day);
+      if (isStart) {
+        _filterStartsFrom = normalized;
+      } else {
+        _filterStartsTo = DateTime(date.year, date.month, date.day, 23, 59);
+      }
+    });
+  }
+
+  Future<void> _pickFilterTime({required bool isStart}) async {
+    final current = isStart ? _filterTimeFrom : _filterTimeTo;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: current ?? const TimeOfDay(hour: 19, minute: 0),
+    );
+    if (time == null) {
+      return;
+    }
+    setState(() {
+      if (isStart) {
+        _filterTimeFrom = time;
+      } else {
+        _filterTimeTo = time;
+      }
+    });
+  }
 }
 
 class _MatchesHeader extends StatelessWidget {
@@ -1155,43 +1443,136 @@ class _MatchesHeader extends StatelessWidget {
 }
 
 class _FindMatchTab extends StatelessWidget {
-  const _FindMatchTab({required this.isMobile});
+  const _FindMatchTab({
+    required this.isMobile,
+    required this.areaController,
+    required this.startsFrom,
+    required this.startsTo,
+    required this.timeFrom,
+    required this.timeTo,
+    required this.joinMode,
+    required this.availableOnly,
+    required this.loading,
+    required this.loadingMore,
+    required this.error,
+    required this.pageError,
+    required this.validationError,
+    required this.actionMessage,
+    required this.matches,
+    required this.totalElements,
+    required this.hasMore,
+    required this.submittedMatchIds,
+    required this.strings,
+    required this.onStartsFrom,
+    required this.onStartsTo,
+    required this.onTimeFrom,
+    required this.onTimeTo,
+    required this.onJoinModeChanged,
+    required this.onAvailableOnlyChanged,
+    required this.onApplyFilters,
+    required this.onResetFilters,
+    required this.onRetry,
+    required this.onLoadMore,
+    required this.onJoin,
+  });
 
   final bool isMobile;
+  final TextEditingController areaController;
+  final DateTime? startsFrom;
+  final DateTime? startsTo;
+  final TimeOfDay? timeFrom;
+  final TimeOfDay? timeTo;
+  final JoinMode? joinMode;
+  final bool availableOnly;
+  final bool loading;
+  final bool loadingMore;
+  final String? error;
+  final String? pageError;
+  final String? validationError;
+  final String? actionMessage;
+  final List<MatchDiscoveryItem> matches;
+  final int totalElements;
+  final bool hasMore;
+  final Set<String> submittedMatchIds;
+  final AppStrings strings;
+  final VoidCallback onStartsFrom;
+  final VoidCallback onStartsTo;
+  final VoidCallback onTimeFrom;
+  final VoidCallback onTimeTo;
+  final ValueChanged<JoinMode?> onJoinModeChanged;
+  final ValueChanged<bool> onAvailableOnlyChanged;
+  final VoidCallback onApplyFilters;
+  final VoidCallback onResetFilters;
+  final VoidCallback onRetry;
+  final VoidCallback? onLoadMore;
+  final ValueChanged<MatchDiscoveryItem> onJoin;
 
   @override
   Widget build(BuildContext context) {
+    final resultSummary = totalElements == 1
+        ? '1 match available'
+        : '$totalElements matches available';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const _MatchFilters(count: 0),
+        _MatchFilters(
+          areaController: areaController,
+          startsFrom: startsFrom,
+          startsTo: startsTo,
+          timeFrom: timeFrom,
+          timeTo: timeTo,
+          joinMode: joinMode,
+          availableOnly: availableOnly,
+          strings: strings,
+          onStartsFrom: onStartsFrom,
+          onStartsTo: onStartsTo,
+          onTimeFrom: onTimeFrom,
+          onTimeTo: onTimeTo,
+          onJoinModeChanged: onJoinModeChanged,
+          onAvailableOnlyChanged: onAvailableOnlyChanged,
+          onApplyFilters: onApplyFilters,
+          onResetFilters: onResetFilters,
+        ),
         const SizedBox(height: PeladinhasSpacing.xl),
-        if (isMobile)
-          const Column(
-            children: [
-              _MatchesStateCard(
-                title: 'No open matches found',
-                message:
-                    'Open matches will appear here when they are available.',
-              ),
-              SizedBox(height: PeladinhasSpacing.xl),
-              _AreaPanel(compact: true),
-            ],
+        if (validationError != null)
+          _DiscoveryNotice(message: validationError!, isError: true)
+        else if (actionMessage != null)
+          _DiscoveryNotice(message: actionMessage!, isError: false),
+        if (validationError != null || actionMessage != null)
+          const SizedBox(height: PeladinhasSpacing.lg),
+        PeladinhasStatusLabel(label: resultSummary),
+        const SizedBox(height: PeladinhasSpacing.lg),
+        if (loading)
+          const _DiscoveryLoadingCard()
+        else if (error != null)
+          _DiscoveryErrorCard(message: error!, onRetry: onRetry)
+        else if (matches.isEmpty)
+          const _MatchesStateCard(
+            title: 'No open matches found',
+            message: 'Try changing your filters or checking again later.',
           )
         else
-          const Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          Column(
             children: [
-              Expanded(
-                flex: 7,
-                child: _MatchesStateCard(
-                  title: 'No open matches found',
-                  message:
-                      'Open matches will appear here when they are available.',
+              for (final match in matches) ...[
+                _DiscoveryMatchCard(
+                  match: match,
+                  strings: strings,
+                  isSubmitted: submittedMatchIds.contains(match.matchId),
+                  onJoin: () => onJoin(match),
                 ),
-              ),
-              SizedBox(width: 20),
-              SizedBox(width: 324, child: _AreaPanel(compact: false)),
+                const SizedBox(height: PeladinhasSpacing.lg),
+              ],
+              if (hasMore)
+                PeladinhasButton(
+                  label: loadingMore ? 'Loading...' : 'Load more matches',
+                  tone: PeladinhasButtonTone.secondary,
+                  onPressed: onLoadMore,
+                ),
+              if (pageError != null) ...[
+                const SizedBox(height: PeladinhasSpacing.lg),
+                _DiscoveryInlineError(message: pageError!, onRetry: onLoadMore),
+              ],
             ],
           ),
       ],
@@ -1381,56 +1762,334 @@ class _UpcomingMatchesTab extends StatelessWidget {
 }
 
 class _MatchFilters extends StatelessWidget {
-  const _MatchFilters({required this.count});
+  const _MatchFilters({
+    required this.areaController,
+    required this.startsFrom,
+    required this.startsTo,
+    required this.timeFrom,
+    required this.timeTo,
+    required this.joinMode,
+    required this.availableOnly,
+    required this.strings,
+    required this.onStartsFrom,
+    required this.onStartsTo,
+    required this.onTimeFrom,
+    required this.onTimeTo,
+    required this.onJoinModeChanged,
+    required this.onAvailableOnlyChanged,
+    required this.onApplyFilters,
+    required this.onResetFilters,
+  });
 
-  final int count;
+  final TextEditingController areaController;
+  final DateTime? startsFrom;
+  final DateTime? startsTo;
+  final TimeOfDay? timeFrom;
+  final TimeOfDay? timeTo;
+  final JoinMode? joinMode;
+  final bool availableOnly;
+  final AppStrings strings;
+  final VoidCallback onStartsFrom;
+  final VoidCallback onStartsTo;
+  final VoidCallback onTimeFrom;
+  final VoidCallback onTimeTo;
+  final ValueChanged<JoinMode?> onJoinModeChanged;
+  final ValueChanged<bool> onAvailableOnlyChanged;
+  final VoidCallback onApplyFilters;
+  final VoidCallback onResetFilters;
 
   @override
   Widget build(BuildContext context) {
-    return Wrap(
-      spacing: 10,
-      runSpacing: 10,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: [
-        _FilterChip(label: 'Lisbon', active: true),
-        _FilterChip(label: 'This week'),
-        _FilterChip(label: 'Any format'),
-        _FilterChip(label: 'My level'),
-        const SizedBox(width: 120),
-        PeladinhasStatusLabel(label: '$count open matches'),
-      ],
+    return PeladinhasCard(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Find a match', style: PeladinhasTypography.title),
+          const SizedBox(height: PeladinhasSpacing.lg),
+          Wrap(
+            spacing: PeladinhasSpacing.lg,
+            runSpacing: PeladinhasSpacing.lg,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              SizedBox(
+                width: 260,
+                child: TextField(
+                  controller: areaController,
+                  decoration: const InputDecoration(
+                    labelText: 'Area',
+                    hintText: 'City or neighbourhood',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ),
+              _FilterAction(
+                label: 'From date',
+                value: _formatShortDate(startsFrom),
+                onPressed: onStartsFrom,
+              ),
+              _FilterAction(
+                label: 'To date',
+                value: _formatShortDate(startsTo),
+                onPressed: onStartsTo,
+              ),
+              _FilterAction(
+                label: 'From time',
+                value: _formatTimeOfDay(timeFrom),
+                onPressed: onTimeFrom,
+              ),
+              _FilterAction(
+                label: 'To time',
+                value: _formatTimeOfDay(timeTo),
+                onPressed: onTimeTo,
+              ),
+              SizedBox(
+                width: 280,
+                child: DropdownButtonFormField<JoinMode?>(
+                  isExpanded: true,
+                  initialValue: joinMode,
+                  decoration: const InputDecoration(labelText: 'Join mode'),
+                  items: [
+                    const DropdownMenuItem<JoinMode?>(
+                      value: null,
+                      child: Text('Any join mode'),
+                    ),
+                    ...JoinMode.values.map(
+                      (mode) => DropdownMenuItem<JoinMode?>(
+                        value: mode,
+                        child: Text(strings.joinModeLabel(mode.apiValue)),
+                      ),
+                    ),
+                  ],
+                  onChanged: onJoinModeChanged,
+                ),
+              ),
+              SizedBox(
+                width: 210,
+                child: Row(
+                  children: [
+                    Checkbox(
+                      value: availableOnly,
+                      onChanged: (value) =>
+                          onAvailableOnlyChanged(value ?? false),
+                    ),
+                    const Expanded(child: Text('Available places only')),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: PeladinhasSpacing.lg),
+          Wrap(
+            spacing: PeladinhasSpacing.sm,
+            runSpacing: PeladinhasSpacing.sm,
+            children: [
+              PeladinhasButton(
+                label: 'Apply filters',
+                onPressed: onApplyFilters,
+              ),
+              PeladinhasButton(
+                label: 'Reset',
+                tone: PeladinhasButtonTone.secondary,
+                onPressed: onResetFilters,
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
 
-class _FilterChip extends StatelessWidget {
-  const _FilterChip({required this.label, this.active = false});
+class _FilterAction extends StatelessWidget {
+  const _FilterAction({
+    required this.label,
+    required this.value,
+    required this.onPressed,
+  });
 
   final String label;
-  final bool active;
+  final String value;
+  final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) {
-    return PeladinhasInputShell(
-      active: active,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
+    return SizedBox(
+      width: 170,
+      child: OutlinedButton(
+        onPressed: onPressed,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(label, style: PeladinhasTypography.eyebrow),
+            Text(value, overflow: TextOverflow.ellipsis),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DiscoveryLoadingCard extends StatelessWidget {
+  const _DiscoveryLoadingCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return const PeladinhasCard(
+      padding: EdgeInsets.all(24),
+      child: Center(child: CircularProgressIndicator()),
+    );
+  }
+}
+
+class _DiscoveryErrorCard extends StatelessWidget {
+  const _DiscoveryErrorCard({required this.message, required this.onRetry});
+
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return PeladinhasCard(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            label,
-            style: PeladinhasTypography.label.copyWith(
-              color: active
-                  ? PeladinhasColors.brand
-                  : PeladinhasColors.inkSecondary,
-            ),
+            'Matches could not be loaded',
+            style: PeladinhasTypography.sectionTitle,
           ),
+          const SizedBox(height: PeladinhasSpacing.sm),
+          Text(message, style: PeladinhasTypography.body),
+          const SizedBox(height: PeladinhasSpacing.lg),
+          PeladinhasButton(
+            label: 'Retry',
+            tone: PeladinhasButtonTone.secondary,
+            onPressed: onRetry,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DiscoveryInlineError extends StatelessWidget {
+  const _DiscoveryInlineError({required this.message, required this.onRetry});
+
+  final String message;
+  final VoidCallback? onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return PeladinhasCard(
+      padding: const EdgeInsets.all(18),
+      child: Row(
+        children: [
+          Expanded(child: Text(message, style: PeladinhasTypography.body)),
           const SizedBox(width: PeladinhasSpacing.md),
-          Text(
-            '⌄',
-            style: PeladinhasTypography.eyebrow.copyWith(
-              color: active
-                  ? PeladinhasColors.brand
-                  : PeladinhasColors.inkSecondary,
+          PeladinhasButton(
+            label: 'Retry',
+            tone: PeladinhasButtonTone.secondary,
+            onPressed: onRetry,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DiscoveryNotice extends StatelessWidget {
+  const _DiscoveryNotice({required this.message, required this.isError});
+
+  final String message;
+  final bool isError;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = isError
+        ? Theme.of(context).colorScheme.error
+        : Theme.of(context).colorScheme.primary;
+    return Text(message, style: TextStyle(color: color));
+  }
+}
+
+class _DiscoveryMatchCard extends StatelessWidget {
+  const _DiscoveryMatchCard({
+    required this.match,
+    required this.strings,
+    required this.isSubmitted,
+    required this.onJoin,
+  });
+
+  final MatchDiscoveryItem match;
+  final AppStrings strings;
+  final bool isSubmitted;
+  final VoidCallback onJoin;
+
+  @override
+  Widget build(BuildContext context) {
+    final players = '${match.occupiedPlaces}/${match.maxPlayers} players';
+    final available = match.availablePlaces == 1
+        ? '1 place available'
+        : '${match.availablePlaces} places available';
+    final pitchLines = [
+      if (match.pitchName != null && match.pitchName!.isNotEmpty)
+        match.pitchName!,
+      if (match.pitchAddress != null && match.pitchAddress!.isNotEmpty)
+        match.pitchAddress!,
+    ];
+    final price = _formatPrice(match.pitchBasePrice, match.pitchCurrency);
+    return PeladinhasCard(
+      padding: const EdgeInsets.all(22),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: PeladinhasSpacing.sm,
+            runSpacing: PeladinhasSpacing.sm,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              PeladinhasStatusLabel(
+                label: strings.joinModeLabel(match.joinMode.apiValue),
+              ),
+              PeladinhasStatusLabel(label: available),
+              if (isSubmitted)
+                const PeladinhasStatusLabel(label: 'Participation sent'),
+            ],
+          ),
+          const SizedBox(height: PeladinhasSpacing.lg),
+          Text(match.displayName, style: PeladinhasTypography.title),
+          const SizedBox(height: PeladinhasSpacing.md),
+          Wrap(
+            spacing: PeladinhasSpacing.lg,
+            runSpacing: PeladinhasSpacing.sm,
+            children: [
+              _MatchFact(
+                icon: Icons.schedule_outlined,
+                label:
+                    '${_formatDateTime(match.startsAt)} - '
+                    '${_formatLocalTime(match.endsAt)}',
+              ),
+              _MatchFact(icon: Icons.groups_outlined, label: players),
+              _MatchFact(
+                icon: Icons.timer_outlined,
+                label: '${match.durationMinutes} minutes',
+              ),
+              if (price != null)
+                _MatchFact(icon: Icons.payments_outlined, label: price),
+            ],
+          ),
+          if (pitchLines.isNotEmpty) ...[
+            const SizedBox(height: PeladinhasSpacing.md),
+            Text(pitchLines.join(' · '), style: PeladinhasTypography.body),
+          ],
+          const SizedBox(height: PeladinhasSpacing.lg),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: PeladinhasButton(
+              label: isSubmitted ? 'Request sent' : _joinButtonLabel(match),
+              onPressed: isSubmitted ? null : onJoin,
             ),
           ),
         ],
@@ -1439,84 +2098,23 @@ class _FilterChip extends StatelessWidget {
   }
 }
 
-class _AreaPanel extends StatelessWidget {
-  const _AreaPanel({required this.compact});
+class _MatchFact extends StatelessWidget {
+  const _MatchFact({required this.icon, required this.label});
 
-  final bool compact;
+  final IconData icon;
+  final String label;
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: PeladinhasColors.brandDark,
-        borderRadius: BorderRadius.circular(PeladinhasRadii.sm),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(28),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'PLAY NEAR YOU',
-              style: PeladinhasTypography.eyebrow.copyWith(
-                color: PeladinhasColors.highlight,
-              ),
-            ),
-            const SizedBox(height: PeladinhasSpacing.lg),
-            Text(
-              'Lisbon',
-              style: PeladinhasTypography.title.copyWith(
-                color: PeladinhasColors.onDark,
-              ),
-            ),
-            const SizedBox(height: PeladinhasSpacing.md),
-            Text(
-              'Browse games by neighbourhood and discover the places where your football community already plays.',
-              style: PeladinhasTypography.body.copyWith(
-                color: PeladinhasColors.onDark.withValues(alpha: 0.74),
-              ),
-            ),
-            const SizedBox(height: PeladinhasSpacing.lg),
-            SizedBox(
-              height: compact ? 150 : 190,
-              width: double.infinity,
-              child: const CustomPaint(painter: _AreaMapPainter()),
-            ),
-          ],
-        ),
-      ),
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 18, color: PeladinhasColors.inkSecondary),
+        const SizedBox(width: PeladinhasSpacing.xs),
+        Text(label, style: PeladinhasTypography.body),
+      ],
     );
   }
-}
-
-class _AreaMapPainter extends CustomPainter {
-  const _AreaMapPainter();
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final background = Paint()..color = PeladinhasColors.brand;
-    final marker = Paint()..color = PeladinhasColors.highlight;
-    final rect = RRect.fromRectAndRadius(
-      Offset.zero & size,
-      const Radius.circular(PeladinhasRadii.xs),
-    );
-    canvas.drawRRect(rect, background);
-    for (final offset in const [
-      Offset(0.22, 0.24),
-      Offset(0.63, 0.20),
-      Offset(0.38, 0.58),
-      Offset(0.80, 0.66),
-    ]) {
-      canvas.drawCircle(
-        Offset(size.width * offset.dx, size.height * offset.dy),
-        4,
-        marker,
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 class _MatchesStateCard extends StatelessWidget {
@@ -2222,6 +2820,64 @@ class _StatusText extends StatelessWidget {
       style: TextStyle(color: Theme.of(context).colorScheme.primary),
     );
   }
+}
+
+String _joinButtonLabel(MatchDiscoveryItem match) {
+  return match.joinMode == JoinMode.openJoin ? 'Join match' : 'Request to join';
+}
+
+String _participantStatusLabel(String status) {
+  return switch (status) {
+    'awaiting_payment' => 'Awaiting payment',
+    'requested' => 'Requested',
+    'confirmed' => 'Confirmed',
+    'cancelled' => 'Cancelled',
+    _ => 'Updated',
+  };
+}
+
+String _formatQueryTime(TimeOfDay? value) {
+  if (value == null) {
+    return '';
+  }
+  final hour = value.hour.toString().padLeft(2, '0');
+  final minute = value.minute.toString().padLeft(2, '0');
+  return '$hour:$minute';
+}
+
+int _minutesOfDay(TimeOfDay value) {
+  return (value.hour * 60) + value.minute;
+}
+
+String _formatShortDate(DateTime? value) {
+  if (value == null) {
+    return 'Any';
+  }
+  final local = value.toLocal();
+  return '${local.year.toString().padLeft(4, '0')}-'
+      '${local.month.toString().padLeft(2, '0')}-'
+      '${local.day.toString().padLeft(2, '0')}';
+}
+
+String _formatTimeOfDay(TimeOfDay? value) {
+  if (value == null) {
+    return 'Any';
+  }
+  return _formatQueryTime(value);
+}
+
+String _formatLocalTime(DateTime value) {
+  final local = value.toLocal();
+  return '${local.hour.toString().padLeft(2, '0')}:'
+      '${local.minute.toString().padLeft(2, '0')}';
+}
+
+String? _formatPrice(num? price, String? currency) {
+  if (price == null || currency == null || currency.trim().isEmpty) {
+    return null;
+  }
+  final formatted = price % 1 == 0 ? price.toInt().toString() : '$price';
+  return '$formatted ${currency.trim().toUpperCase()}';
 }
 
 class _SectionCard extends StatelessWidget {

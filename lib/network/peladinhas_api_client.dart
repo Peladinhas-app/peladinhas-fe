@@ -7,6 +7,7 @@ import '../config/development_config.dart';
 import '../models/api_error.dart';
 import '../models/booking.dart';
 import '../models/match.dart';
+import '../models/match_discovery.dart';
 import '../models/participant.dart';
 import '../models/pitch.dart';
 import '../models/user_profile.dart';
@@ -66,8 +67,8 @@ class PeladinhasApiClient {
     http.Client? httpClient,
     String baseUrl = DevelopmentConfig.apiBaseUrl,
     this.tokenProvider,
-  })  : _httpClient = httpClient ?? http.Client(),
-        _baseUri = Uri.parse(baseUrl);
+  }) : _httpClient = httpClient ?? http.Client(),
+       _baseUri = Uri.parse(baseUrl);
 
   final http.Client _httpClient;
   final AccessTokenProvider? tokenProvider;
@@ -99,12 +100,9 @@ class PeladinhasApiClient {
     required String matchId,
     required String nextStatus,
   }) async {
-    final response = await _post(
-      '/matches/$matchId/status-transitions',
-      {
-        'nextStatus': nextStatus,
-      },
-    );
+    final response = await _post('/matches/$matchId/status-transitions', {
+      'nextStatus': nextStatus,
+    });
     return Match.fromJson(_decodeObject(response));
   }
 
@@ -112,6 +110,18 @@ class PeladinhasApiClient {
     final response = await _get('/matches/$matchId');
     _ensureSuccess(response);
     return Match.fromJson(_decodeObject(response));
+  }
+
+  Future<MatchDiscoveryPage> discoverMatches({
+    MatchDiscoveryFilters filters = const MatchDiscoveryFilters(),
+    int page = 0,
+    int size = 10,
+  }) async {
+    final response = await _get(
+      '/matches/discovery',
+      queryParameters: filters.toQueryParameters(page: page, size: size),
+    );
+    return MatchDiscoveryPage.fromJson(_decodeObject(response));
   }
 
   Future<Participant> joinOpenMatch(String matchId) async {
@@ -199,9 +209,9 @@ class PeladinhasApiClient {
     return _httpClient
         .post(_uri(path), headers: await _headers(), body: jsonEncode(body))
         .then((response) {
-      _ensureSuccess(response);
-      return response;
-    });
+          _ensureSuccess(response);
+          return response;
+        });
   }
 
   Uri _uri(String path, {Map<String, String>? queryParameters}) {
