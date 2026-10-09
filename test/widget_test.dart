@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:peladinhas/auth/peladinhas_auth_service.dart';
+import 'package:peladinhas/design/peladinhas_components.dart';
 import 'package:peladinhas/design/peladinhas_tokens.dart';
 import 'package:peladinhas/main.dart';
 import 'package:peladinhas/models/auth_session.dart';
@@ -659,6 +660,336 @@ void main() {
     expect(bookingRequests, greaterThan(1));
   });
 
+  testWidgets(
+    'match discovery renders backend matches without raw API values',
+    (tester) async {
+      await _useDesktopViewport(tester);
+
+      await tester.pumpWidget(
+        _appWith(
+          auth: _FakeAuthService(current: _session),
+          handler: _discoveryHandler(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('nav-matches')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Sunday Football'), findsOneWidget);
+      expect(find.text('Central Pitch · Lisbon'), findsOneWidget);
+      expect(find.text('OPEN JOIN'), findsWidgets);
+      expect(find.text('4 PLACES AVAILABLE'), findsOneWidget);
+      expect(find.text('6/10 players'), findsOneWidget);
+      expect(find.text('60 EUR'), findsOneWidget);
+      expect(find.textContaining('2026-10-10T18:00:00Z'), findsNothing);
+      expect(find.textContaining('open_join'), findsNothing);
+    },
+  );
+
+  testWidgets('match discovery hides failures behind a safe retry state', (
+    tester,
+  ) async {
+    await _useDesktopViewport(tester);
+
+    await tester.pumpWidget(
+      _appWith(
+        auth: _FakeAuthService(current: _session),
+        handler: (request) async {
+          if (request.url.path.endsWith('/matches/discovery')) {
+            throw Exception(
+              'SocketException https://internal.example.test token=fake-token',
+            );
+          }
+          return _profileResponse()(request);
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-matches')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text("We couldn't load matches. Please try again."),
+      findsOneWidget,
+    );
+    expect(find.text('Retry'), findsOneWidget);
+    expect(find.textContaining('SocketException'), findsNothing);
+    expect(find.textContaining('https://'), findsNothing);
+    expect(find.textContaining('fake-token'), findsNothing);
+  });
+
+  testWidgets('join requires confirmation and prevents repeated submission', (
+    tester,
+  ) async {
+    await _useDesktopViewport(tester);
+
+    var joinRequests = 0;
+    await tester.pumpWidget(
+      _appWith(
+        auth: _FakeAuthService(current: _session),
+        handler: _discoveryHandler(
+          onJoin: () {
+            joinRequests += 1;
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-matches')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Join match'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Confirm participation'), findsOneWidget);
+    expect(joinRequests, 0);
+
+    await tester.tap(find.text('Join'));
+    await tester.pumpAndSettle();
+
+    expect(joinRequests, 1);
+    expect(
+      find.text('Joined. Participant status: Awaiting payment.'),
+      findsOneWidget,
+    );
+    expect(find.text('Request sent'), findsOneWidget);
+
+    await tester.tap(find.text('Request sent'));
+    await tester.pumpAndSettle();
+
+    expect(joinRequests, 1);
+  });
+
+  testWidgets('unsupported discovery join mode renders only a safe error', (
+    tester,
+  ) async {
+    await _useDesktopViewport(tester);
+
+    var joinRequests = 0;
+    await tester.pumpWidget(
+      _appWith(
+        auth: _FakeAuthService(current: _session),
+        handler: (request) async {
+          if (request.url.path.endsWith('/matches/discovery')) {
+            return http.Response(
+              jsonEncode(
+                _discoveryPageJson(
+                  matches: [_discoveryMatchJson(joinMode: 'invite_only')],
+                ),
+              ),
+              200,
+              headers: {'Content-Type': 'application/json'},
+            );
+          }
+          if (request.url.path.contains('/join')) {
+            joinRequests += 1;
+          }
+          return _profileResponse()(request);
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-matches')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text("We couldn't load matches. Please try again."),
+      findsOneWidget,
+    );
+    expect(find.textContaining('invite_only'), findsNothing);
+    expect(find.text('Join match'), findsNothing);
+    expect(joinRequests, 0);
+  });
+
+  testWidgets('slower old discovery response cannot replace newer results', (
+    tester,
+  ) async {
+    await _useDesktopViewport(tester);
+
+    final first = Completer<http.Response>();
+    final second = Completer<http.Response>();
+    var discoveryRequests = 0;
+    await tester.pumpWidget(
+      _appWith(
+        auth: _FakeAuthService(current: _session),
+        handler: (request) {
+          if (request.url.path.endsWith('/matches/discovery')) {
+            discoveryRequests += 1;
+            return discoveryRequests == 1 ? first.future : second.future;
+          }
+          return _profileResponse()(request);
+        },
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byKey(const Key('nav-matches')));
+    await tester.pump();
+    await tester.enterText(find.widgetWithText(TextField, 'Area'), 'new area');
+    await tester.tap(find.text('Apply filters'));
+    await tester.pump();
+
+    second.complete(
+      _discoveryResponse(displayName: 'New Match', matchId: _secondMatchId),
+    );
+    await tester.pumpAndSettle();
+    first.complete(_discoveryResponse(displayName: 'Old Match'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('New Match'), findsOneWidget);
+    expect(find.text('Old Match'), findsNothing);
+  });
+
+  testWidgets('old discovery error cannot replace newer success', (
+    tester,
+  ) async {
+    await _useDesktopViewport(tester);
+
+    final first = Completer<http.Response>();
+    final second = Completer<http.Response>();
+    var discoveryRequests = 0;
+    await tester.pumpWidget(
+      _appWith(
+        auth: _FakeAuthService(current: _session),
+        handler: (request) {
+          if (request.url.path.endsWith('/matches/discovery')) {
+            discoveryRequests += 1;
+            return discoveryRequests == 1 ? first.future : second.future;
+          }
+          return _profileResponse()(request);
+        },
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byKey(const Key('nav-matches')));
+    await tester.pump();
+    await tester.tap(find.text('Apply filters'));
+    await tester.pump();
+
+    second.complete(_discoveryResponse(displayName: 'Current Match'));
+    await tester.pumpAndSettle();
+    first.complete(_serverError());
+    await tester.pumpAndSettle();
+
+    expect(find.text('Current Match'), findsOneWidget);
+    expect(
+      find.text("We couldn't load matches. Please try again."),
+      findsNothing,
+    );
+  });
+
+  testWidgets('old load-more response is ignored after filters change', (
+    tester,
+  ) async {
+    await _useDesktopViewport(tester);
+
+    final loadMore = Completer<http.Response>();
+    final filtered = Completer<http.Response>();
+    var discoveryRequests = 0;
+    await tester.pumpWidget(
+      _appWith(
+        auth: _FakeAuthService(current: _session),
+        handler: (request) {
+          if (request.url.path.endsWith('/matches/discovery')) {
+            discoveryRequests += 1;
+            if (discoveryRequests == 1) {
+              return Future.value(
+                _discoveryResponse(totalElements: 2, totalPages: 2),
+              );
+            }
+            return discoveryRequests == 2 ? loadMore.future : filtered.future;
+          }
+          return _profileResponse()(request);
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-matches')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Load more matches'));
+    await tester.pump();
+    await tester.enterText(find.widgetWithText(TextField, 'Area'), 'filtered');
+    await tester.tap(find.text('Apply filters'));
+    await tester.pump();
+
+    filtered.complete(
+      _discoveryResponse(
+        displayName: 'Filtered Match',
+        matchId: _secondMatchId,
+      ),
+    );
+    await tester.pumpAndSettle();
+    loadMore.complete(
+      _discoveryResponse(displayName: 'Stale Next Page', page: 1),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Filtered Match'), findsOneWidget);
+    expect(find.text('Stale Next Page'), findsNothing);
+  });
+
+  testWidgets('load-more failure keeps cards and retry appends once', (
+    tester,
+  ) async {
+    await _useDesktopViewport(tester);
+
+    var pageOneRequests = 0;
+    await tester.pumpWidget(
+      _appWith(
+        auth: _FakeAuthService(current: _session),
+        handler: (request) async {
+          if (request.url.path.endsWith('/matches/discovery')) {
+            final page = request.url.queryParameters['page'];
+            if (page == '1') {
+              pageOneRequests += 1;
+              if (pageOneRequests == 1) {
+                return _serverError();
+              }
+              return _discoveryResponse(
+                displayName: 'Second Match',
+                matchId: _secondMatchId,
+                page: 1,
+                totalElements: 2,
+                totalPages: 2,
+              );
+            }
+            return _discoveryResponse(totalElements: 2, totalPages: 2);
+          }
+          return _profileResponse()(request);
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('nav-matches')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Load more matches'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Sunday Football'), findsOneWidget);
+    expect(
+      find.text("We couldn't load matches. Please try again."),
+      findsOneWidget,
+    );
+    expect(find.text('No open matches found'), findsNothing);
+
+    await tester.tap(find.widgetWithText(PeladinhasButton, 'Retry'));
+    await tester.pumpAndSettle();
+
+    expect(pageOneRequests, 2);
+    expect(find.text('Sunday Football'), findsOneWidget);
+    expect(find.text('Second Match'), findsOneWidget);
+    expect(
+      find.text("We couldn't load matches. Please try again."),
+      findsNothing,
+    );
+  });
+
   testWidgets('player cannot access owner screens from stored mode', (
     tester,
   ) async {
@@ -713,6 +1044,9 @@ final _session = AuthSession(
   userId: 'supabase-user',
   email: 'test@example.com',
 );
+
+const _firstMatchId = '00000000-0000-4000-8000-000000000101';
+const _secondMatchId = '00000000-0000-4000-8000-000000000102';
 
 PeladinhasApp _appWith({
   required _FakeAuthService auth,
@@ -785,6 +1119,91 @@ Future<http.Response> _ownerHandler(http.Request request) async {
     );
   }
   return _profileResponse(pitchOwner: true)(request);
+}
+
+Future<http.Response> Function(http.Request request) _discoveryHandler({
+  VoidCallback? onJoin,
+}) {
+  return (request) async {
+    if (request.url.path.endsWith('/matches/discovery')) {
+      return _discoveryResponse();
+    }
+    if (request.url.path.endsWith('/matches/$_firstMatchId/join')) {
+      onJoin?.call();
+      return http.Response(
+        jsonEncode({
+          'userId': 'user-1',
+          'status': 'awaiting_payment',
+          'joinedAt': '2026-10-10T18:01:00Z',
+        }),
+        200,
+        headers: {'Content-Type': 'application/json'},
+      );
+    }
+    return _profileResponse()(request);
+  };
+}
+
+http.Response _discoveryResponse({
+  String matchId = _firstMatchId,
+  String displayName = 'Sunday Football',
+  int page = 0,
+  int totalElements = 1,
+  int totalPages = 1,
+}) {
+  return http.Response(
+    jsonEncode(
+      _discoveryPageJson(
+        matches: [
+          _discoveryMatchJson(matchId: matchId, displayName: displayName),
+        ],
+        page: page,
+        totalElements: totalElements,
+        totalPages: totalPages,
+      ),
+    ),
+    200,
+    headers: {'Content-Type': 'application/json'},
+  );
+}
+
+Map<String, dynamic> _discoveryPageJson({
+  required List<Map<String, dynamic>> matches,
+  int page = 0,
+  int totalElements = 1,
+  int totalPages = 1,
+}) {
+  return {
+    'matches': matches,
+    'page': page,
+    'size': 10,
+    'totalElements': totalElements,
+    'totalPages': totalPages,
+  };
+}
+
+Map<String, dynamic> _discoveryMatchJson({
+  String matchId = _firstMatchId,
+  String displayName = 'Sunday Football',
+  String joinMode = 'open_join',
+}) {
+  return {
+    'matchId': matchId,
+    'displayName': displayName,
+    'startsAt': '2026-10-10T18:00:00Z',
+    'endsAt': '2026-10-10T19:30:00Z',
+    'durationMinutes': 90,
+    'maxPlayers': 10,
+    'occupiedPlaces': 6,
+    'availablePlaces': 4,
+    'pitchId': '00000000-0000-4000-8000-000000000201',
+    'pitchName': 'Central Pitch',
+    'pitchAddress': 'Lisbon',
+    'pitchBasePrice': 60,
+    'pitchCurrency': 'EUR',
+    'groupVisibility': 'public',
+    'joinMode': joinMode,
+  };
 }
 
 Future<http.Response> _profileMissingResponse(http.Request request) async {
